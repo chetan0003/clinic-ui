@@ -92,7 +92,7 @@ export default function Dashboard() {
   const [doctorRefreshKey, setDoctorRefreshKey] = useState(0);
   const [doctorServices, setDoctorServices] = useState([]);
   const [doctorServicesLoading, setDoctorServicesLoading] = useState(false);
-  const [patientForm, setPatientForm] = useState({ name: "", whatsappNumber: "", email: "", dateOfBirth: "" });
+  const [patientForm, setPatientForm] = useState({ name: "", whatsappNumber: "", email: "", dateOfBirth: "", gender: "" });
   const [patientLoading, setPatientLoading] = useState(false);
   const [patientError, setPatientError] = useState("");
   const [appointmentForm, setAppointmentForm] = useState({ patientId: "", patientQuery: "", doctorId: "", serviceId: "", appointmentDate: "", startTime: "09:00", endTime: "09:30" });
@@ -308,7 +308,7 @@ export default function Dashboard() {
       <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
         <div className="brand">
           <div className="brand-logo">+</div>
-          <div className="brand-name">Hola MD</div>
+          <div className="brand-name">hola.MD</div>
         </div>
 
         <div className="clinic-switcher">
@@ -573,7 +573,7 @@ export default function Dashboard() {
       {modal === "patient" && (
         <Modal
           title="Add Patient"
-          onClose={() => { setModal(null); setPatientError(""); setPatientForm({ name: "", whatsappNumber: "", email: "", dateOfBirth: "" }); }}
+          onClose={() => { setModal(null); setPatientError(""); setPatientForm({ name: "", whatsappNumber: "", email: "", dateOfBirth: "", gender: "" }); }}
           onSave={async () => {
             setPatientError("");
             if (!selectedClinicId) {
@@ -591,9 +591,10 @@ export default function Dashboard() {
                 whatsappNumber: patientForm.whatsappNumber.trim(),
                 email: patientForm.email.trim(),
                 dateOfBirth: patientForm.dateOfBirth,
+                gender: patientForm.gender,
               }, token);
               setModal(null);
-              setPatientForm({ name: "", whatsappNumber: "", email: "", dateOfBirth: "" });
+              setPatientForm({ name: "", whatsappNumber: "", email: "", dateOfBirth: "", gender: "" });
               showToast("Patient added successfully");
             } catch (err) {
               setPatientError(err.message || "Unable to add patient.");
@@ -609,6 +610,16 @@ export default function Dashboard() {
             <Field label="WhatsApp Number *" placeholder="+91..." value={patientForm.whatsappNumber} onChange={(e) => setPatientForm((v) => ({ ...v, whatsappNumber: e.target.value }))} />
             <Field label="Email" type="email" placeholder="Optional" value={patientForm.email} onChange={(e) => setPatientForm((v) => ({ ...v, email: e.target.value }))} />
             <Field label="Date of Birth" type="date" value={patientForm.dateOfBirth} onChange={(e) => setPatientForm((v) => ({ ...v, dateOfBirth: e.target.value }))} />
+            <div className="field">
+              <label>Gender</label>
+              <select value={patientForm.gender} onChange={(e) => setPatientForm((v) => ({ ...v, gender: e.target.value }))}>
+                <option value="">Select gender</option>
+                <option value="MALE">Male</option>
+                <option value="FEMALE">Female</option>
+                <option value="OTHER">Other</option>
+                <option value="PREFER_NOT_TO_SAY">Prefer not to say</option>
+              </select>
+            </div>
           </div>
           {patientError && <div className="auth-error" style={{ marginTop: 12 }}>{patientError}</div>}
         </Modal>
@@ -1499,8 +1510,8 @@ function Patients({ openModal, showToast, clinicId, token }) {
       {!loading && error && <div className="auth-error">{error}</div>}
       {!loading && !error && filteredPatients.length === 0 && <p className="muted">No patients found for this clinic.</p>}
     </div>
-    {!loading && !error && filteredPatients.length > 0 && <div className="table-wrap"><table><thead><tr><th>ID</th><th>Patient</th><th>WhatsApp</th><th>Clinic ID</th><th>Action</th></tr></thead><tbody>
-      {filteredPatients.map((patient) => <tr key={patient.id}><td>{patient.id}</td><td><div className="patient-cell"><div className="small-avatar">{initials({ firstName: patient.name })}</div><div><strong>{patient.name}</strong><span>Patient</span></div></div></td><td>{patient.phoneNo}</td><td>{patient.clinicId}</td><td><button className="btn btn-light icon-btn" title="View patient history" aria-label="View patient history" onClick={() => { setSelectedPatient(patient); setHistoryPage(0); setHistory([]); setHistoryPagination(null); setHistoryError(""); }}>👁</button></td></tr>)}
+    {!loading && !error && filteredPatients.length > 0 && <div className="table-wrap"><table><thead><tr><th>ID</th><th>Patient</th><th>WhatsApp</th><th>Gender</th><th>Clinic ID</th><th>Action</th></tr></thead><tbody>
+      {filteredPatients.map((patient) => <tr key={patient.id}><td>{patient.id}</td><td><div className="patient-cell"><div className="small-avatar">{initials({ firstName: patient.name })}</div><div><strong>{patient.name}</strong><span>Patient</span></div></div></td><td>{patient.phoneNo}</td><td>{patient.gender || "-"}</td><td>{patient.clinicId}</td><td><button className="btn btn-light icon-btn" title="View patient history" aria-label="View patient history" onClick={() => { setSelectedPatient(patient); setHistoryPage(0); setHistory([]); setHistoryPagination(null); setHistoryError(""); }}>👁</button></td></tr>)}
     </tbody></table></div>}
     {!loading && !error && <div className="pagination">
       <button className="btn btn-light" disabled={page === 0} onClick={() => handlePageChange(-1)}>Previous</button>
