@@ -353,6 +353,17 @@ export function getClinicDashboard(clinicId, token) {
   });
 }
 
+export function getClinicWeeklyAppointments(clinicId, token) {
+  return request(`/api/dashboard/clinics/${clinicId}/appointments-this-week`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  }).then((payload) => {
+    const data = unwrapApiData(payload);
+    return Array.isArray(data) ? data : [];
+  });
+}
+
 export function getClinicHolidays(clinicId, token) {
   return request(`/api/dashboard/clinics/${clinicId}/holidays`, {
     headers: {

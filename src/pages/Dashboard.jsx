@@ -1,7 +1,7 @@
 import React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { cancelAppointment, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, upsertClinicWorkingHours } from "../services/api";
+import { cancelAppointment, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, upsertClinicWorkingHours } from "../services/api";
 
 const pageMeta = {
   dashboard: ["Dashboard", "Good morning. Here's today's clinic overview."],
@@ -49,7 +49,7 @@ function addMinutesToTime(time, minutes) {
   return `${String(Math.floor(normalizedMinutes / 60)).padStart(2, "0")}:${String(normalizedMinutes % 60).padStart(2, "0")}`;
 }
 
-function Modal({ title, children, onClose, onSave, saveLabel = "Save", saveDisabled = false }) {
+function Modal({ title, children, onClose, onSave, saveLabel = "Save", saveDisabled = false, saveClassName = "btn btn-primary" }) {
   return (
     <div className="modal-backdrop open" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal">
@@ -60,7 +60,7 @@ function Modal({ title, children, onClose, onSave, saveLabel = "Save", saveDisab
         <div className="modal-body">{children}</div>
         <div className="modal-footer">
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={onSave} disabled={saveDisabled}>{saveLabel}</button>
+          <button className={saveClassName} onClick={onSave} disabled={saveDisabled}>{saveLabel}</button>
         </div>
       </div>
     </div>
@@ -819,6 +819,9 @@ function DashboardHome({ go, openModal, clinicId, clinicName, token }) {
   const [error, setError] = useState("");
   const [holidays, setHolidays] = useState([]);
   const [holidaysLoading, setHolidaysLoading] = useState(true);
+  const [weeklyAppointments, setWeeklyAppointments] = useState([]);
+  const [weeklyAppointmentsLoading, setWeeklyAppointmentsLoading] = useState(true);
+  const [weeklyAppointmentsError, setWeeklyAppointmentsError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -844,6 +847,35 @@ function DashboardHome({ go, openModal, clinicId, clinicName, token }) {
     }
 
     loadDashboard();
+    return () => { cancelled = true; };
+  }, [clinicId, token]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWeeklyAppointments() {
+      if (!token || !clinicId) {
+        setWeeklyAppointments([]);
+        setWeeklyAppointmentsLoading(false);
+        return;
+      }
+
+      try {
+        setWeeklyAppointmentsLoading(true);
+        setWeeklyAppointmentsError("");
+        const result = await getClinicWeeklyAppointments(clinicId, token);
+        if (!cancelled) setWeeklyAppointments(result);
+      } catch (err) {
+        if (!cancelled) {
+          setWeeklyAppointments([]);
+          setWeeklyAppointmentsError(err.message || "Unable to load weekly appointment statistics.");
+        }
+      } finally {
+        if (!cancelled) setWeeklyAppointmentsLoading(false);
+      }
+    }
+
+    loadWeeklyAppointments();
     return () => { cancelled = true; };
   }, [clinicId, token]);
 
@@ -880,6 +912,7 @@ function DashboardHome({ go, openModal, clinicId, clinicName, token }) {
   }, [clinicId, token]);
 
   const schedule = dashboard?.todaySchedule || [];
+  const weeklyMax = Math.max(...weeklyAppointments.map((item) => Number(item.appointmentCount) || 0), 1);
 
   return (
     <section className="page active">
@@ -920,15 +953,20 @@ function DashboardHome({ go, openModal, clinicId, clinicName, token }) {
         <div className="card">
           <div className="card-header"><div><h3>Appointments This Week</h3><p>Number of appointments by day</p></div></div>
           <div className="card-body">
+            {weeklyAppointmentsLoading && <p className="muted">Loading weekly appointments...</p>}
+            {!weeklyAppointmentsLoading && weeklyAppointmentsError && <div className="auth-error">{weeklyAppointmentsError}</div>}
+            {!weeklyAppointmentsLoading && !weeklyAppointmentsError && weeklyAppointments.length === 0 && <p className="muted">No weekly appointment data available.</p>}
+            {!weeklyAppointmentsLoading && !weeklyAppointmentsError && weeklyAppointments.length > 0 && <>
             <div className="chart">
-              {[62, 78, 53, 86, 69, 39, 16].map((h, i) => (
-                <div className="bar-wrap" key={i}>
-                  <div className="bar" style={{ height: `${h}%` }} />
-                  <span className="bar-label">{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]}</span>
+              {weeklyAppointments.map((item) => (
+                <div className="bar-wrap" key={item.date || item.day} title={`${item.day}: ${item.appointmentCount || 0} appointments`}>
+                  <div className="bar" style={{ height: `${Math.max(((Number(item.appointmentCount) || 0) / weeklyMax) * 100, item.appointmentCount ? 10 : 2)}%` }} />
+                  <span className="bar-label">{item.day}</span>
                 </div>
               ))}
             </div>
-            <div className="chart-grid"><span>0</span><span>10</span><span>20</span><span>30</span></div>
+            <div className="chart-grid"><span>0</span><span>{Math.ceil(weeklyMax / 3)}</span><span>{Math.ceil((weeklyMax * 2) / 3)}</span><span>{weeklyMax}</span></div>
+            </>}
           </div>
         </div>
       </div>
@@ -1009,6 +1047,8 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
   const [error, setError] = useState("");
   const [updatingAppointmentId, setUpdatingAppointmentId] = useState(null);
   const [cancelingAppointmentId, setCancelingAppointmentId] = useState(null);
+  const [cancelConfirmationId, setCancelConfirmationId] = useState(null);
+  const [cancelError, setCancelError] = useState("");
   const [creatingNextAppointmentId, setCreatingNextAppointmentId] = useState(null);
   const [reschedulingAppointmentId, setReschedulingAppointmentId] = useState(null);
   const [scheduleModal, setScheduleModal] = useState(null);
@@ -1164,25 +1204,34 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
     }
   }
 
-  async function handleCancelAppointment(appointmentId) {
+  function handleCancelAppointment(appointmentId) {
     if (!token) {
       setError("Please log in to cancel appointments.");
       return;
     }
 
+    setCancelError("");
+    setCancelConfirmationId(appointmentId);
+  }
+
+  async function confirmCancelAppointment() {
+    const appointmentId = cancelConfirmationId;
+    if (!appointmentId) return;
+
     try {
       setCancelingAppointmentId(appointmentId);
-      setError("");
+      setCancelError("");
       const updatedAppointment = await cancelAppointment(appointmentId, token);
       setRows((items) => items.map((appointment) => appointment.id === appointmentId
         ? { ...appointment, ...(updatedAppointment || {}), status: updatedAppointment?.status || "CANCELLED" }
         : appointment));
+      setCancelConfirmationId(null);
+      showToast("Appointment cancelled");
     } catch (err) {
-      setError(err.message || "Unable to cancel appointment.");
+      setCancelError(err.message || "Unable to cancel appointment.");
     } finally {
       setCancelingAppointmentId(null);
     }
-    showToast("Appointment cancelled");
   }
 
   async function handleCreateNextAppointment(appointment) {
@@ -1313,6 +1362,17 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
       </div>
     </div>}
   </div></section>
+  {cancelConfirmationId && <Modal
+    title="Cancel Appointment"
+    onClose={() => { setCancelConfirmationId(null); setCancelError(""); }}
+    onSave={confirmCancelAppointment}
+    saveLabel={cancelingAppointmentId ? "Cancelling..." : "Cancel Appointment"}
+    saveDisabled={Boolean(cancelingAppointmentId)}
+    saveClassName="btn btn-danger"
+  >
+    {cancelError && <div className="auth-error">{cancelError}</div>}
+    <p>Are you sure you want to cancel this appointment? This action cannot be undone.</p>
+  </Modal>}
   {scheduleModal && <Modal
     title={scheduleModal.mode === "next" ? "Create Next Visit" : "Reschedule Appointment"}
     onClose={() => setScheduleModal(null)}
