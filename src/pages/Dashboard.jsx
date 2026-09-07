@@ -1,7 +1,7 @@
 import React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo,useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { cancelAppointment, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, upsertClinicWorkingHours } from "../services/api";
+import { cancelAppointment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getClinicWhatsAppConfig, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, upsertClinicWorkingHours } from "../services/api";
 
 const pageMeta = {
   dashboard: ["Dashboard", "Good morning. Here's today's clinic overview."],
@@ -2034,6 +2034,10 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
   const [loadingClinics, setLoadingClinics] = useState(true);
   const [editingClinicId, setEditingClinicId] = useState(null);
   const [workingHoursSaving, setWorkingHoursSaving] = useState(false);
+  const [whatsappConfig, setWhatsappConfig] = useState({ phoneNumberId: "", wabaId: "", businessAccountId: "", displayPhoneNumber: "", accessToken: "", status: "ACTIVE" });
+  const [whatsappConfigSaving, setWhatsappConfigSaving] = useState(false);
+  const [whatsappConnecting, setWhatsappConnecting] = useState(false);
+  const [whatsappSdkReady, setWhatsappSdkReady] = useState(false);
   const [holidayForm, setHolidayForm] = useState({ holidayDate: new Date().toISOString().slice(0, 10), name: "" });
   const [holidaySaving, setHolidaySaving] = useState(false);
   const [holidayList, setHolidayList] = useState([]);
@@ -2120,6 +2124,125 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
     }
 
     loadAvailableDoctors();
+    return () => { cancelled = true; };
+  }, [clinicId, token]);
+  const fbInitPromiseRef = useRef(null);
+  useEffect(() => {
+    const appId = import.meta.env.VITE_META_APP_ID;
+
+    if (!appId) {
+        console.error("Meta App ID is missing");
+        return;
+    }
+
+    let cancelled = false;
+
+    const initializeFacebookSdk = () => {
+        if (!window.FB) {
+            throw new Error("Facebook SDK loaded but window.FB is unavailable");
+        }
+
+        console.log("Calling FB.init()...");
+
+        window.FB.init({
+            appId: appId,
+            cookie: true,
+            xfbml: true,
+            version: "v20.0",
+        });
+
+        console.log("FB.init() called successfully; waiting for SDK readiness");
+
+        return new Promise((resolve) => {
+          window.FB.getLoginStatus(() => {
+            if (!cancelled) setWhatsappSdkReady(true);
+            resolve(window.FB);
+          });
+        });
+    };
+
+    fbInitPromiseRef.current = new Promise((resolve, reject) => {
+
+        // FB already exists
+        if (window.FB) {
+            try {
+                initializeFacebookSdk().then(resolve).catch(reject);
+            } catch (error) {
+                console.error("FB initialization failed:", error);
+                reject(error);
+            }
+            return;
+        }
+
+        // Facebook SDK callback
+        window.fbAsyncInit = () => {
+            try {
+                console.log("fbAsyncInit fired");
+
+                initializeFacebookSdk().then(resolve).catch(reject);
+
+            } catch (error) {
+                console.error("FB initialization failed:", error);
+                reject(error);
+            }
+        };
+
+        let script = document.getElementById("facebook-jssdk");
+
+        if (!script) {
+            console.log("Loading Facebook SDK...");
+
+            script = document.createElement("script");
+            script.id = "facebook-jssdk";
+            script.src = "https://connect.facebook.net/en_US/sdk.js";
+            script.async = true;
+            script.defer = true;
+            script.crossOrigin = "anonymous";
+
+            script.onerror = () => {
+                reject(new Error("Failed to load Facebook SDK"));
+            };
+
+            document.body.appendChild(script);
+        } else {
+            console.log("Facebook SDK script already exists");
+        }
+    });
+
+    return () => {
+        cancelled = true;
+    };
+
+}, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWhatsAppConfig() {
+      if (!token || !clinicId) {
+        setWhatsappConfig({ phoneNumberId: "", wabaId: "", businessAccountId: "", displayPhoneNumber: "", accessToken: "", status: "ACTIVE" });
+        return;
+      }
+
+      try {
+        const result = await getClinicWhatsAppConfig(clinicId, token);
+        const config = result?.data && typeof result.data === "object" ? result.data : result || {};
+        if (!cancelled) {
+          setWhatsappConfig({
+            phoneNumberId: config.phoneNumberId || config.phone_number_id || "",
+            wabaId: config.wabaId || config.waba_id || "",
+            businessAccountId: config.businessAccountId || config.business_account_id || "",
+            displayPhoneNumber: config.displayPhoneNumber || config.display_phone_number || "",
+            accessToken: config.accessToken || config.access_token || "",
+            status: config.status || "ACTIVE",
+          });
+        }
+      } catch (err) {
+        if (!cancelled && err.status !== 404) setError(err.message || "Unable to load WhatsApp configuration.");
+      }
+    }
+
+    loadWhatsAppConfig();
     return () => { cancelled = true; };
   }, [clinicId, token]);
 
@@ -2336,13 +2459,197 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
       setDoctorAvailabilitySaving(false);
     }
   }
+  
+  async function handleWhatsAppConfigSave() {
+    if (!token) {
+      setError("A clinic-admin login token is required.");
+      return;
+    }
 
+    if (!clinicId) {
+      setError("Please select a clinic first.");
+      return;
+    }
+
+    const requiredFields = ["phoneNumberId", "wabaId", "displayPhoneNumber", "accessToken"];
+    if (requiredFields.some((field) => !whatsappConfig[field].trim())) {
+      setError("Please fill all required WhatsApp configuration fields.");
+      return;
+    }
+
+    try {
+      setWhatsappConfigSaving(true);
+      setError("");
+      await saveClinicWhatsAppConfig(clinicId, {
+        phoneNumberId: whatsappConfig.phoneNumberId.trim(),
+        wabaId: whatsappConfig.wabaId.trim(),
+        businessAccountId: whatsappConfig.businessAccountId.trim() || null,
+        displayPhoneNumber: whatsappConfig.displayPhoneNumber.trim(),
+        accessToken: whatsappConfig.accessToken.trim(),
+        status: whatsappConfig.status,
+      }, token);
+      showToast("WhatsApp configuration saved");
+    } catch (err) {
+      const code = err?.code || "UNKNOWN";
+      const friendlyMessage = err.message || "Unable to save WhatsApp configuration.";
+      setError(`${friendlyMessage}${code && code !== "UNKNOWN" ? ` (${code})` : ""}`);
+      showToast(friendlyMessage);
+    } finally {
+      setWhatsappConfigSaving(false);
+    }
+  }
+
+function launchWhatsAppSignup() {
+    const appId = import.meta.env.VITE_META_APP_ID;
+    const configId = import.meta.env.VITE_META_WHATSAPP_CONFIG_ID;
+
+    console.log(
+        "Launching WhatsApp signup with appId:",
+        appId,
+        "and configId:",
+        configId
+    );
+
+    if (!appId || !configId) {
+        setError(
+            "Meta App ID and WhatsApp Signup Config ID must be configured."
+        );
+        return;
+    }
+
+    console.log(
+        "WhatsApp SDK ready:",
+        whatsappSdkReady,
+        "FB object:",
+        window.FB
+    );
+
+    console.log("===== WhatsApp SDK CHECK =====");
+    console.log("whatsappSdkReady:", whatsappSdkReady);
+    console.log("window.FB:", window.FB);
+    console.log("window.location.protocol:", window.location.protocol);
+    console.log("window.location.href:", window.location.href);
+    console.log("==============================");
+
+    if (!clinicId) {
+        setError("Please select a clinic first.");
+        return;
+    }
+
+    setWhatsappConnecting(true);
+    setError("");
+
+    const startLogin = (fb) => {
+      // Keep FB.login's callback synchronous; backend work is handled separately.
+      fb.login(
+        (response) => handleWhatsAppSignupResponse(response),
+        {
+          config_id: configId,
+          response_type: "code",
+          override_default_response_type: true,
+        }
+      );
+    };
+
+    if (fbInitPromiseRef.current) {
+      fbInitPromiseRef.current.then(startLogin).catch((err) => {
+        setWhatsappConnecting(false);
+        setError(err.message || "Unable to initialize WhatsApp signup.");
+      });
+    } else {
+      setWhatsappConnecting(false);
+      setError("WhatsApp signup is still loading. Please try again in a moment.");
+    }
+}
+
+const handleWhatsAppSignupResponse = async (response) => {
+    try {
+        console.log("WhatsApp signup response:", response);
+
+        const code = response?.authResponse?.code;
+
+        if (!code) {
+            setError(
+                "WhatsApp authorization was cancelled or not granted."
+            );
+            setWhatsappConnecting(false);
+            return;
+        }
+
+        console.log("WhatsApp authorization code received");
+
+        await connectClinicWhatsApp(
+            clinicId,
+            code,
+            token
+        );
+
+        console.log("WhatsApp connected to backend successfully");
+
+        const savedConfig = await getClinicWhatsAppConfig(
+            clinicId,
+            token
+        );
+
+        const config =
+            savedConfig?.data &&
+            typeof savedConfig.data === "object"
+                ? savedConfig.data
+                : savedConfig || {};
+
+        setWhatsappConfig((value) => ({
+            ...value,
+
+            phoneNumberId:
+                config.phoneNumberId ||
+                config.phone_number_id ||
+                value.phoneNumberId,
+
+            wabaId:
+                config.wabaId ||
+                config.waba_id ||
+                value.wabaId,
+
+            businessAccountId:
+                config.businessAccountId ||
+                config.business_account_id ||
+                value.businessAccountId,
+
+            displayPhoneNumber:
+                config.displayPhoneNumber ||
+                config.display_phone_number ||
+                value.displayPhoneNumber,
+
+            status: config.status || "ACTIVE",
+        }));
+
+        showToast("WhatsApp connected successfully");
+
+    } catch (err) {
+
+        console.error(
+            "WhatsApp signup failed:",
+            err
+        );
+
+        const message =
+            err?.message ||
+            "Unable to connect WhatsApp.";
+
+        setError(message);
+        showToast(message);
+
+    } finally {
+        setWhatsappConnecting(false);
+    }
+};
   return <section className="page active"><div className="card"><div className="settings-grid">
     <div className="settings-nav">
       <button className={activeTab === "profile" ? "active" : ""} onClick={() => setActiveTab("profile")}>Clinic Profile</button>
       <button className={activeTab === "holidays" ? "active" : ""} onClick={() => setActiveTab("holidays")}>Clinic Holidays</button>
       <button className={activeTab === "doctor" ? "active" : ""} onClick={() => setActiveTab("doctor")}>Doctor Availability</button>
       <button className={activeTab === "hours" ? "active" : ""} onClick={() => setActiveTab("hours")}>Working Hours</button>
+      <button className={activeTab === "whatsapp" ? "active" : ""} onClick={() => setActiveTab("whatsapp")}>WhatsApp Configuration</button>
     </div>
     <div className="settings-main">
       {error && <div className="auth-error">{error}</div>}
@@ -2453,5 +2760,29 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
           }
         }} disabled={workingHoursSaving}>{workingHoursSaving ? "Saving..." : "Save Working Hours"}</button>
         </div>}
+      {activeTab === "whatsapp" && <div className="mt">
+        <h3>WhatsApp Configuration</h3>
+        <p className="muted">Configure the WhatsApp Business connection for this clinic.</p>
+        <div className="quick-actions mt">
+          <button className="btn btn-primary" onClick={launchWhatsAppSignup} disabled={whatsappConnecting}>{whatsappConnecting ? "Connecting..." : "Connect WhatsApp to Hola MD"}</button>
+          <span className={`status ${whatsappConfig.status === "ACTIVE" && whatsappConfig.phoneNumberId ? "confirmed" : "pending"}`}>{whatsappConfig.status === "ACTIVE" && whatsappConfig.phoneNumberId ? "CONNECTED" : "NOT CONNECTED"}</span>
+        </div>
+        <div className="form-grid mt">
+          <Field label="Phone Number ID *" value={whatsappConfig.phoneNumberId} onChange={(e) => setWhatsappConfig((value) => ({ ...value, phoneNumberId: e.target.value }))} />
+          <Field label="WABA ID *" value={whatsappConfig.wabaId} onChange={(e) => setWhatsappConfig((value) => ({ ...value, wabaId: e.target.value }))} />
+          <Field label="Business Account ID" value={whatsappConfig.businessAccountId} onChange={(e) => setWhatsappConfig((value) => ({ ...value, businessAccountId: e.target.value }))} />
+          <Field label="Display Phone Number *" value={whatsappConfig.displayPhoneNumber} onChange={(e) => setWhatsappConfig((value) => ({ ...value, displayPhoneNumber: e.target.value }))} placeholder="+91..." />
+          <Field label="Access Token *" type="password" value={whatsappConfig.accessToken} onChange={(e) => setWhatsappConfig((value) => ({ ...value, accessToken: e.target.value }))} />
+          <div className="field">
+            <label>Status *</label>
+            <select value={whatsappConfig.status} onChange={(e) => setWhatsappConfig((value) => ({ ...value, status: e.target.value }))}>
+              <option value="ACTIVE">ACTIVE</option>
+              <option value="INACTIVE">INACTIVE</option>
+              <option value="DISCONNECTED">DISCONNECTED</option>
+            </select>
+          </div>
+        </div>
+        <button className="btn btn-primary mt" onClick={handleWhatsAppConfigSave} disabled={whatsappConfigSaving}>{whatsappConfigSaving ? "Saving..." : "Save WhatsApp Configuration"}</button>
+      </div>}
       </div></div></div></section>;
 }

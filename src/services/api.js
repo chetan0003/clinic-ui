@@ -335,6 +335,7 @@ export function createClinicPatient(clinicId, payload, token) {
       whatsappNumber: payload.whatsappNumber,
       email: payload.email,
       dateOfBirth: payload.dateOfBirth,
+      gender: payload.gender,
     }),
   }).then((response) => {
     if (response && typeof response === "object") {
@@ -564,6 +565,40 @@ export function upsertClinicWorkingHours(clinicId, payload, token) {
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(payload),
+  });
+}
+
+export function getClinicWhatsAppConfig(clinicId, token) {
+  return request(`/api/dashboard/clinics/${clinicId}/whatsapp-config`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  }).then((payload) => unwrapApiData(payload));
+}
+
+export function saveClinicWhatsAppConfig(clinicId, payload, token) {
+  return request(`/api/dashboard/clinics/${clinicId}/whatsapp-config`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  }).then((payload) => {
+    if (payload && typeof payload === "object") {
+      if (payload.data && typeof payload.data === "object") return payload.data;
+      if (payload.config && typeof payload.config === "object") return payload.config;
+    }
+    return payload;
+  });
+}
+
+export function connectClinicWhatsApp(clinicId, code, token) {
+  return request("/api/whatsapp/connect", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ code, clinicId }),
   });
 }
 
