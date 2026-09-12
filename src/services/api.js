@@ -309,6 +309,15 @@ export function getPatientAppointmentHistory(clinicId, patientId, filters = {}, 
   });
 }
 
+export function generatePatientQr(clinicId, patientId, token) {
+  return request(`/api/dashboard/clinics/${clinicId}/patients/${patientId}/qr`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
 export function searchClinicPatientsByQuery(clinicId, query, token) {
   const params = new URLSearchParams();
   if (query) params.set("query", query.trim());
