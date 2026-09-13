@@ -1,7 +1,7 @@
 import React from "react";
 import { useEffect, useMemo,useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { cancelAppointment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generatePatientQr, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getClinicWhatsAppConfig, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, upsertClinicWorkingHours } from "../services/api";
+import { cancelAppointment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getClinicWhatsAppConfig, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, upsertClinicWorkingHours } from "../services/api";
 
 const pageMeta = {
   dashboard: ["Dashboard", "Good morning. Here's today's clinic overview."],
@@ -2089,6 +2089,9 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
   const [whatsappConfigSaving, setWhatsappConfigSaving] = useState(false);
   const [whatsappConnecting, setWhatsappConnecting] = useState(false);
   const [whatsappSdkReady, setWhatsappSdkReady] = useState(false);
+  const [clinicQr, setClinicQr] = useState(null);
+  const [clinicQrLoading, setClinicQrLoading] = useState(false);
+  const [clinicQrError, setClinicQrError] = useState("");
   const [holidayForm, setHolidayForm] = useState({ holidayDate: new Date().toISOString().slice(0, 10), name: "" });
   const [holidaySaving, setHolidaySaving] = useState(false);
   const [holidayList, setHolidayList] = useState([]);
@@ -2550,6 +2553,30 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
     }
   }
 
+  async function handleClinicQrGenerate() {
+    if (!token) {
+      setClinicQrError("A clinic-admin login token is required.");
+      return;
+    }
+    if (!clinicId) {
+      setClinicQrError("Please select a clinic first.");
+      return;
+    }
+
+    try {
+      setClinicQrLoading(true);
+      setClinicQrError("");
+      const response = await generateClinicQr(clinicId, token);
+      const qrData = response?.data;
+      if (!qrData?.qrImageBase64) throw new Error("The clinic QR image was not returned by the server.");
+      setClinicQr({ ...qrData, image: `data:image/png;base64,${qrData.qrImageBase64}` });
+    } catch (err) {
+      setClinicQrError(err.message || "Unable to generate clinic QR code.");
+    } finally {
+      setClinicQrLoading(false);
+    }
+  }
+
 function launchWhatsAppSignup() {
     const appId = import.meta.env.VITE_META_APP_ID;
     const configId = import.meta.env.VITE_META_WHATSAPP_CONFIG_ID;
@@ -2834,6 +2861,19 @@ const handleWhatsAppSignupResponse = async (response) => {
           </div>
         </div>
         <button className="btn btn-primary mt" onClick={handleWhatsAppConfigSave} disabled={whatsappConfigSaving}>{whatsappConfigSaving ? "Saving..." : "Save WhatsApp Configuration"}</button>
+        <div className="holiday-settings mt">
+          <h3>Clinic QR Code</h3>
+          <p className="muted">Generate a WhatsApp QR code for this clinic.</p>
+          <button className="btn btn-primary" onClick={handleClinicQrGenerate} disabled={clinicQrLoading}>{clinicQrLoading ? "Generating..." : "Generate Clinic QR Code"}</button>
+          {clinicQrError && <div className="auth-error" style={{ marginTop: 12 }}>{clinicQrError}</div>}
+          {clinicQr?.image && <div style={{ marginTop: 16, textAlign: "center" }}>
+            <img src={clinicQr.image} alt="Clinic QR code" style={{ width: 400, height: 400, maxWidth: "100%", objectFit: "contain", border: "1px solid var(--border)", borderRadius: 10 }} />
+            <div className="quick-actions" style={{ justifyContent: "center", marginTop: 16 }}>
+              <button className="btn btn-outline" onClick={() => window.open(clinicQr.image, "_blank", "noopener,noreferrer")}>Open QR Image</button>
+              <a className="btn btn-primary" href={clinicQr.image} download={`clinic-${clinicId}-qr.png`}>Download QR</a>
+            </div>
+          </div>}
+        </div>
       </div>}
       </div></div></div></section>;
 }
