@@ -309,6 +309,24 @@ export function getPatientAppointmentHistory(clinicId, patientId, filters = {}, 
   });
 }
 
+export function generatePatientQr(clinicId, patientId, token) {
+  return request(`/api/dashboard/clinics/${clinicId}/patients/${patientId}/qr`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+export function generateClinicQr(clinicId, token) {
+  return request(`/api/dashboard/clinics/${clinicId}/qr`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
 export function searchClinicPatientsByQuery(clinicId, query, token) {
   const params = new URLSearchParams();
   if (query) params.set("query", query.trim());
@@ -327,6 +345,28 @@ export function searchClinicPatientsByQuery(clinicId, query, token) {
 export function createClinicPatient(clinicId, payload, token) {
   return request(`/api/dashboard/clinics/${clinicId}/patients`, {
     method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      name: payload.name,
+      whatsappNumber: payload.whatsappNumber,
+      email: payload.email,
+      dateOfBirth: payload.dateOfBirth,
+      gender: payload.gender,
+    }),
+  }).then((response) => {
+    if (response && typeof response === "object") {
+      if (response.data && typeof response.data === "object") return response.data;
+      if (response.patient) return response.patient;
+    }
+    return response;
+  });
+}
+
+export function updateClinicPatient(clinicId, patientId, payload, token) {
+  return request(`/api/dashboard/clinics/${clinicId}/patients/${patientId}`, {
+    method: "PUT",
     headers: {
       Authorization: `Bearer ${token}`,
     },
