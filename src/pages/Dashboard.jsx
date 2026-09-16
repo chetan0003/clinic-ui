@@ -1,7 +1,7 @@
 import React from "react";
 import { useEffect, useMemo,useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { cancelAppointment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getClinicWhatsAppConfig, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, upsertClinicWorkingHours } from "../services/api";
+import { cancelAppointment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getClinicWhatsAppConfig, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, updateClinicPatient, upsertClinicWorkingHours } from "../services/api";
 
 const pageMeta = {
   dashboard: ["Dashboard", "Good morning. Here's today's clinic overview."],
@@ -93,6 +93,7 @@ export default function Dashboard() {
   const [doctorServices, setDoctorServices] = useState([]);
   const [doctorServicesLoading, setDoctorServicesLoading] = useState(false);
   const [patientForm, setPatientForm] = useState({ name: "", whatsappNumber: "", email: "", dateOfBirth: "", gender: "" });
+  const [editingPatientId, setEditingPatientId] = useState(null);
   const [patientLoading, setPatientLoading] = useState(false);
   const [patientError, setPatientError] = useState("");
   const [appointmentForm, setAppointmentForm] = useState({ patientId: "", patientQuery: "", doctorId: "", serviceId: "", appointmentDate: "", startTime: "09:00", endTime: "09:30" });
@@ -405,7 +406,24 @@ export default function Dashboard() {
           )}
 
           {page === "patients" && (
-            <Patients openModal={setModal} showToast={showToast} clinicId={selectedClinicId} token={token} />
+            <Patients openModal={setModal} onEdit={(patient) => {
+              if (!patient) {
+                setEditingPatientId(null);
+                setPatientForm({ name: "", whatsappNumber: "", email: "", dateOfBirth: "", gender: "" });
+                setPatientError("");
+                return;
+              }
+              setEditingPatientId(patient.id);
+              setPatientForm({
+                name: patient.name || "",
+                whatsappNumber: patient.whatsappNumber || patient.phoneNo || "",
+                email: patient.email || "",
+                dateOfBirth: patient.dateOfBirth || "",
+                gender: patient.gender || "",
+              });
+              setPatientError("");
+              setModal("patient");
+            }} showToast={showToast} clinicId={selectedClinicId} token={token} />
           )}
 
           {page === "doctors" && (
@@ -572,8 +590,8 @@ export default function Dashboard() {
 
       {modal === "patient" && (
         <Modal
-          title="Add Patient"
-          onClose={() => { setModal(null); setPatientError(""); setPatientForm({ name: "", whatsappNumber: "", email: "", dateOfBirth: "", gender: "" }); }}
+          title={editingPatientId === null ? "Add Patient" : "Edit Patient"}
+          onClose={() => { setModal(null); setEditingPatientId(null); setPatientError(""); setPatientForm({ name: "", whatsappNumber: "", email: "", dateOfBirth: "", gender: "" }); }}
           onSave={async () => {
             setPatientError("");
             if (!selectedClinicId) {
@@ -586,23 +604,29 @@ export default function Dashboard() {
             }
             try {
               setPatientLoading(true);
-              await createClinicPatient(selectedClinicId, {
+              const patientPayload = {
                 name: patientForm.name.trim(),
                 whatsappNumber: patientForm.whatsappNumber.trim(),
                 email: patientForm.email.trim(),
                 dateOfBirth: patientForm.dateOfBirth,
                 gender: patientForm.gender,
-              }, token);
+              };
+              if (editingPatientId === null) {
+                await createClinicPatient(selectedClinicId, patientPayload, token);
+              } else {
+                await updateClinicPatient(selectedClinicId, editingPatientId, patientPayload, token);
+              }
               setModal(null);
+              setEditingPatientId(null);
               setPatientForm({ name: "", whatsappNumber: "", email: "", dateOfBirth: "", gender: "" });
-              showToast("Patient added successfully");
+              showToast(editingPatientId === null ? "Patient added successfully" : "Patient updated successfully");
             } catch (err) {
               setPatientError(err.message || "Unable to add patient.");
             } finally {
               setPatientLoading(false);
             }
           }}
-          saveLabel={patientLoading ? "Adding..." : "Add Patient"}
+          saveLabel={patientLoading ? (editingPatientId === null ? "Adding..." : "Updating...") : (editingPatientId === null ? "Add Patient" : "Update Patient")}
           saveDisabled={patientLoading}
         >
           <div className="form-grid">
@@ -1104,48 +1128,15 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
     if (isDoctor) setDoctorId(userDoctorId ? String(userDoctorId) : "");
   }, [isDoctor, userDoctorId]);
 
-  async function loadAppointmentsForPage(nextPage) {
-    if (!token || !clinicId) {
-      setRows([]);
-      setLoading(false);
-      setError(!token ? "Please log in to view appointments." : "Please select a clinic.");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError("");
-      const result = await getClinicAppointments(clinicId, {
-        from,
-        to,
-        doctorId: isDoctor ? userDoctorId : doctorId,
-        serviceId,
-        status,
-        size: pageSize,
-      }, token);
-
-      const items = Array.isArray(result) ? result : result?.items || [];
-      const nextPagination = result?.pagination || null;
-      setRows(items);
-      setPagination(nextPagination);
-    } catch (err) {
-      setError(err.message || "Unable to load appointments.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   function handlePageChange(direction) {
     const nextPage = Math.max(0, page + direction);
     if (nextPage === page) return;
     setPage(nextPage);
-    loadAppointmentsForPage(nextPage);
   }
 
   function handlePageSizeChange(nextSize) {
     setPage(0);
     setPageSize(Number(nextSize) || 5);
-    loadAppointmentsForPage(0);
   }
 
   useEffect(() => {
@@ -1193,6 +1184,9 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
     return !query || [appointment.patientName, appointment.serviceName, appointment.doctorName]
       .some((value) => String(value || "").toLowerCase().includes(query));
   });
+  const currentPage = Number(pagination?.number ?? pagination?.pageNumber ?? page) || 0;
+  const totalPages = Number(pagination?.totalPages) > 0 ? Number(pagination.totalPages) : null;
+  const hasNextPage = totalPages !== null ? currentPage < totalPages - 1 : rows.length >= pageSize;
 
   async function handleStatusUpdate(appointmentId, nextStatus) {
     if (!token) {
@@ -1366,10 +1360,10 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
     </tbody></table></div>}
     {!loading && !error && <div className="pagination">
       <button className="btn btn-light" disabled={page === 0} onClick={() => handlePageChange(-1)}>Previous</button>
-      <span className="pagination-meta">Page {Math.max((pagination?.number ?? page) + 1, 1)} of {Math.max(pagination?.totalPages || 1, 1)}</span>
+      <span className="pagination-meta">Page {Math.max(currentPage + 1, 1)}{totalPages === null ? "" : ` of ${totalPages}`}</span>
       <div className="pagination-actions">
         <select className="control" value={pageSize} onChange={(e) => handlePageSizeChange(e.target.value)} style={{ maxWidth: 90 }}><option value={5}>5</option><option value={10}>10</option><option value={20}>20</option></select>
-        <button className="btn btn-light" disabled={!pagination || page >= (pagination.totalPages || 1) - 1} onClick={() => handlePageChange(1)}>Next</button>
+        <button className="btn btn-light" disabled={!hasNextPage} onClick={() => handlePageChange(1)}>Next</button>
       </div>
     </div>}
   </div></section>
@@ -1413,7 +1407,7 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
   </>;
 }
 
-function Patients({ openModal, showToast, clinicId, token }) {
+function Patients({ openModal, onEdit, showToast, clinicId, token }) {
   const [patients, setPatients] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1537,15 +1531,15 @@ function Patients({ openModal, showToast, clinicId, token }) {
 
   return <>
   <section className="page active"><div className="card">
-    <div className="card-header"><div><h3>Patients</h3><p>Patients associated with this clinic</p></div><button className="btn btn-primary" onClick={() => openModal("patient")}>+ Add Patient</button></div>
+    <div className="card-header"><div><h3>Patients</h3><p>Patients associated with this clinic</p></div><button className="btn btn-primary" onClick={() => { onEdit(null); openModal("patient"); }}>+ Add Patient</button></div>
     <div className="filters"><input className="control" style={{minWidth:240}} placeholder="Search by name or WhatsApp..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /><button className="btn btn-outline" onClick={() => showToast(`${filteredPatients.length} patients found`)}>Search</button></div>
     <div className="card-body">
       {loading && <p className="muted">Loading patients...</p>}
       {!loading && error && <div className="auth-error">{error}</div>}
       {!loading && !error && filteredPatients.length === 0 && <p className="muted">No patients found for this clinic.</p>}
     </div>
-    {!loading && !error && filteredPatients.length > 0 && <div className="table-wrap"><table><thead><tr><th>ID</th><th>Patient</th><th>WhatsApp</th><th>Gender</th><th>Clinic ID</th><th>Action</th></tr></thead><tbody>
-      {filteredPatients.map((patient) => <tr key={patient.id}><td>{patient.id}</td><td><div className="patient-cell"><div className="small-avatar">{initials({ firstName: patient.name })}</div><div><strong>{patient.name}</strong><span>Patient</span></div></div></td><td>{patient.phoneNo}</td><td>{patient.gender || "-"}</td><td>{patient.clinicId}</td><td><div className="row-actions"><button className="btn btn-light icon-btn" title="View patient QR code" aria-label="View patient QR code" onClick={() => setQrPatient(patient)}>▦</button><button className="btn btn-light icon-btn" title="View patient history" aria-label="View patient history" onClick={() => { setSelectedPatient(patient); setHistoryPage(0); setHistory([]); setHistoryPagination(null); setHistoryError(""); }}>👁</button></div></td></tr>)}
+    {!loading && !error && filteredPatients.length > 0 && <div className="table-wrap"><table><thead><tr><th>ID</th><th>Patient</th><th>WhatsApp</th><th>Gender</th><th>Source</th><th>Profile Status</th><th>Clinic ID</th><th>Action</th></tr></thead><tbody>
+      {filteredPatients.map((patient) => <tr key={patient.id}><td>{patient.id}</td><td><div className="patient-cell"><div className="small-avatar">{initials({ firstName: patient.name })}</div><div><strong>{patient.name}</strong><span>Patient</span></div></div></td><td>{patient.phoneNo}</td><td>{patient.gender || "-"}</td><td>{patient.source || "-"}</td><td>{patient.patientProfileStatus || "-"}</td><td>{patient.clinicId}</td><td><div className="row-actions"><button className="btn btn-light icon-btn" title="Edit patient" aria-label="Edit patient" onClick={() => onEdit(patient)}>✎</button><button className="btn btn-light icon-btn" title="View patient QR code" aria-label="View patient QR code" onClick={() => setQrPatient(patient)}>▦</button><button className="btn btn-light icon-btn" title="View patient history" aria-label="View patient history" onClick={() => { setSelectedPatient(patient); setHistoryPage(0); setHistory([]); setHistoryPagination(null); setHistoryError(""); }}>👁</button></div></td></tr>)}
     </tbody></table></div>}
     {!loading && !error && <div className="pagination">
       <button className="btn btn-light" disabled={page === 0} onClick={() => handlePageChange(-1)}>Previous</button>

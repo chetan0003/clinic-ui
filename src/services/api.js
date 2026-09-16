@@ -364,6 +364,28 @@ export function createClinicPatient(clinicId, payload, token) {
   });
 }
 
+export function updateClinicPatient(clinicId, patientId, payload, token) {
+  return request(`/api/dashboard/clinics/${clinicId}/patients/${patientId}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      name: payload.name,
+      whatsappNumber: payload.whatsappNumber,
+      email: payload.email,
+      dateOfBirth: payload.dateOfBirth,
+      gender: payload.gender,
+    }),
+  }).then((response) => {
+    if (response && typeof response === "object") {
+      if (response.data && typeof response.data === "object") return response.data;
+      if (response.patient) return response.patient;
+    }
+    return response;
+  });
+}
+
 export function getClinicDashboard(clinicId, token) {
   return request(`/api/dashboard/${clinicId}`, {
     headers: {
