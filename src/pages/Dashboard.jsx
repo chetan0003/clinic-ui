@@ -2658,7 +2658,7 @@ const handleWhatsAppSignupResponse = async (response) => {
       <button className={activeTab === "holidays" ? "active" : ""} onClick={() => setActiveTab("holidays")}>Clinic Holidays</button>
       <button className={activeTab === "doctor" ? "active" : ""} onClick={() => setActiveTab("doctor")}>Doctor Availability</button>
       <button className={activeTab === "hours" ? "active" : ""} onClick={() => setActiveTab("hours")}>Working Hours</button>
-      {canViewClinicProfile && <button className={activeTab === "whatsapp" ? "active" : ""} onClick={() => setActiveTab("whatsapp")}>WhatsApp Configuration</button>}
+      <button className={activeTab === "whatsapp" ? "active" : ""} onClick={() => setActiveTab("whatsapp")}>WhatsApp Configuration</button>
     </div>
     <div className="settings-main">
       {error && <div className="auth-error">{error}</div>}
@@ -2769,7 +2769,8 @@ const handleWhatsAppSignupResponse = async (response) => {
           }
         }} disabled={workingHoursSaving}>{workingHoursSaving ? "Saving..." : "Save Working Hours"}</button>
         </div>}
-      {activeTab === "whatsapp" && canViewClinicProfile && <div className="mt">
+      {activeTab === "whatsapp" && <div className="mt">
+        {canViewClinicProfile && <>
         <h3>WhatsApp Configuration</h3>
         <p className="muted">Configure the WhatsApp Business connection for this clinic.</p>
         <div className="quick-actions mt">
@@ -2792,6 +2793,7 @@ const handleWhatsAppSignupResponse = async (response) => {
           </div>
         </div>
         <button className="btn btn-primary mt" onClick={handleWhatsAppConfigSave} disabled={whatsappConfigSaving}>{whatsappConfigSaving ? "Saving..." : "Save WhatsApp Configuration"}</button>
+        </>}
         <div className="holiday-settings mt">
           <h3>Clinic QR Code</h3>
           <p className="muted">Generate a WhatsApp QR code for this clinic.</p>
