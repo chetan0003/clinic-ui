@@ -1,7 +1,7 @@
 import React from "react";
 import { useEffect, useMemo,useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { cancelAppointment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getClinicWhatsAppConfig, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, updateClinicPatient, upsertClinicWorkingHours } from "../services/api";
+import { cancelAppointment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, updateClinicPatient, upsertClinicWorkingHours } from "../services/api";
 
 const pageMeta = {
   dashboard: ["Dashboard", "Good morning. Here's today's clinic overview."],
@@ -2266,37 +2266,6 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
   useEffect(() => {
     let cancelled = false;
 
-    async function loadWhatsAppConfig() {
-      if (!token || !clinicId) {
-        setWhatsappConfig({ phoneNumberId: "", wabaId: "", businessAccountId: "", displayPhoneNumber: "", accessToken: "", status: "ACTIVE" });
-        return;
-      }
-
-      try {
-        const result = await getClinicWhatsAppConfig(clinicId, token);
-        const config = result?.data && typeof result.data === "object" ? result.data : result || {};
-        if (!cancelled) {
-          setWhatsappConfig({
-            phoneNumberId: config.phoneNumberId || config.phone_number_id || "",
-            wabaId: config.wabaId || config.waba_id || "",
-            businessAccountId: config.businessAccountId || config.business_account_id || "",
-            displayPhoneNumber: config.displayPhoneNumber || config.display_phone_number || "",
-            accessToken: config.accessToken || config.access_token || "",
-            status: config.status || "ACTIVE",
-          });
-        }
-      } catch (err) {
-        if (!cancelled && err.status !== 404) setError(err.message || "Unable to load WhatsApp configuration.");
-      }
-    }
-
-    loadWhatsAppConfig();
-    return () => { cancelled = true; };
-  }, [clinicId, token]);
-
-  useEffect(() => {
-    let cancelled = false;
-
     async function loadHolidays() {
       if (!token || !clinicId) {
         setHolidayList([]);
@@ -2330,13 +2299,13 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
     let cancelled = false;
 
     async function loadDoctorAvailabilitySchedule() {
-      if (!token || !clinicId || !doctorId) {
+      if (!token || !clinicId || !selectedDoctorId) {
         setDoctorAvailability(defaultDoctorAvailability);
         return;
       }
 
       try {
-        const result = await getDoctorAvailability(clinicId, Number(doctorId), token);
+        const result = await getDoctorAvailability(clinicId, Number(selectedDoctorId), token);
         const items = Array.isArray(result)
           ? result
           : Array.isArray(result?.data)
@@ -2658,41 +2627,9 @@ const handleWhatsAppSignupResponse = async (response) => {
 
         console.log("WhatsApp connected to backend successfully");
 
-        const savedConfig = await getClinicWhatsAppConfig(
-            clinicId,
-            token
-        );
-
-        const config =
-            savedConfig?.data &&
-            typeof savedConfig.data === "object"
-                ? savedConfig.data
-                : savedConfig || {};
-
         setWhatsappConfig((value) => ({
             ...value,
-
-            phoneNumberId:
-                config.phoneNumberId ||
-                config.phone_number_id ||
-                value.phoneNumberId,
-
-            wabaId:
-                config.wabaId ||
-                config.waba_id ||
-                value.wabaId,
-
-            businessAccountId:
-                config.businessAccountId ||
-                config.business_account_id ||
-                value.businessAccountId,
-
-            displayPhoneNumber:
-                config.displayPhoneNumber ||
-                config.display_phone_number ||
-                value.displayPhoneNumber,
-
-            status: config.status || "ACTIVE",
+          status: "ACTIVE",
         }));
 
         showToast("WhatsApp connected successfully");
@@ -2721,7 +2658,7 @@ const handleWhatsAppSignupResponse = async (response) => {
       <button className={activeTab === "holidays" ? "active" : ""} onClick={() => setActiveTab("holidays")}>Clinic Holidays</button>
       <button className={activeTab === "doctor" ? "active" : ""} onClick={() => setActiveTab("doctor")}>Doctor Availability</button>
       <button className={activeTab === "hours" ? "active" : ""} onClick={() => setActiveTab("hours")}>Working Hours</button>
-      <button className={activeTab === "whatsapp" ? "active" : ""} onClick={() => setActiveTab("whatsapp")}>WhatsApp Configuration</button>
+      {canViewClinicProfile && <button className={activeTab === "whatsapp" ? "active" : ""} onClick={() => setActiveTab("whatsapp")}>WhatsApp Configuration</button>}
     </div>
     <div className="settings-main">
       {error && <div className="auth-error">{error}</div>}
@@ -2832,7 +2769,7 @@ const handleWhatsAppSignupResponse = async (response) => {
           }
         }} disabled={workingHoursSaving}>{workingHoursSaving ? "Saving..." : "Save Working Hours"}</button>
         </div>}
-      {activeTab === "whatsapp" && <div className="mt">
+      {activeTab === "whatsapp" && canViewClinicProfile && <div className="mt">
         <h3>WhatsApp Configuration</h3>
         <p className="muted">Configure the WhatsApp Business connection for this clinic.</p>
         <div className="quick-actions mt">

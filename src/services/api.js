@@ -1,5 +1,5 @@
 const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+  import.meta.env.VITE_API_BASE_URL;
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -606,14 +606,6 @@ export function upsertClinicWorkingHours(clinicId, payload, token) {
     },
     body: JSON.stringify(payload),
   });
-}
-
-export function getClinicWhatsAppConfig(clinicId, token) {
-  return request(`/api/dashboard/clinics/${clinicId}/whatsapp-config`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  }).then((payload) => unwrapApiData(payload));
 }
 
 export function saveClinicWhatsAppConfig(clinicId, payload, token) {
