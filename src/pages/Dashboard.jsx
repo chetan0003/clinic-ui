@@ -1,7 +1,8 @@
 import React from "react";
 import { useEffect, useMemo,useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { cancelAppointment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getClinicWhatsAppConfig, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, updateClinicPatient, upsertClinicWorkingHours } from "../services/api";
+import Subscriptions from "./Subscriptions";
+import { cancelAppointment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, updateClinicPatient, upsertClinicWorkingHours } from "../services/api";
 
 const pageMeta = {
   dashboard: ["Dashboard", "Good morning. Here's today's clinic overview."],
@@ -12,6 +13,7 @@ const pageMeta = {
   services: ["Services", "Services offered by this clinic."],
   staff: ["Staff & Users", "Manage dashboard access and roles."],
   reports: ["Reports", "Clinic performance and appointment analytics."],
+  subscriptions: ["Subscription", "Manage plans, payments, and clinic limits."],
   settings: ["Settings", "Configure your clinic."],
 };
 
@@ -332,6 +334,7 @@ export default function Dashboard() {
 
         <div className="nav-section">Administration</div>
         {canManageStaff && <NavButton active={page === "staff"} onClick={() => go("staff")} icon="♙">Staff & Users</NavButton>}
+        {canManageSettings && <NavButton active={page === "subscriptions"} onClick={() => go("subscriptions")} icon="◇">Subscription</NavButton>}
         <NavButton active={page === "reports"} onClick={() => go("reports")} icon="▥">Reports</NavButton>
         {canManageSettings && <NavButton active={page === "settings"} onClick={() => go("settings")} icon="⚙">Settings</NavButton>}
 
@@ -342,7 +345,7 @@ export default function Dashboard() {
               <div className="u-name">{displayName}</div>
               <div className="u-role">{String(role).replaceAll("_", " ")}</div>
             </div>
-            <button className="logout-side" onClick={logout} title="Logout">↪</button>
+            <button className="logout-side" onClick={logout} title="Logout" aria-label="Logout">↪</button>
           </div>
         </div>
       </aside>
@@ -474,6 +477,8 @@ export default function Dashboard() {
           )}
 
           {page === "reports" && <Reports showToast={showToast} />}
+
+          {page === "subscriptions" && canManageSettings && <Subscriptions clinicId={selectedClinicId} clinicName={selectedClinicName} token={token} isSuperAdmin={isSuperAdmin} showToast={showToast} />}
 
           {page === "settings" && canManageSettings && <Settings showToast={showToast} clinicId={selectedClinicId} doctorId={userDoctorId || 1} token={token} canViewClinicProfile={canViewClinicProfile} />}
           </>}
@@ -1071,11 +1076,12 @@ function InfoLine({ left, right, positive }) {
 }
 
 function Appointments({ clinicId, token, userRole, userDoctorId, search, openModal, showToast }) {
-  const today = new Date().toISOString().slice(0, 10);
-  const [from, setFrom] = useState(today);
-  const [to, setTo] = useState(today);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [doctorId, setDoctorId] = useState("");
   const [serviceId, setServiceId] = useState("");
+  const [filterDoctors, setFilterDoctors] = useState([]);
+  const [filterServices, setFilterServices] = useState([]);
   const [status, setStatus] = useState("");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1094,6 +1100,39 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
   const [pageSize, setPageSize] = useState(5);
   const [pagination, setPagination] = useState(null);
   const isDoctor = String(userRole).toUpperCase() === "DOCTOR";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFilterOptions() {
+      if (!token || !clinicId) {
+        setFilterDoctors([]);
+        setFilterServices([]);
+        return;
+      }
+
+      setDoctorId("");
+      setServiceId("");
+      try {
+        const [doctors, services] = await Promise.all([
+          getClinicDoctors(clinicId, token),
+          getClinicServices(clinicId, token),
+        ]);
+        if (!cancelled) {
+          setFilterDoctors(Array.isArray(doctors) ? doctors : []);
+          setFilterServices(Array.isArray(services) ? services : []);
+        }
+      } catch {
+        if (!cancelled) {
+          setFilterDoctors([]);
+          setFilterServices([]);
+        }
+      }
+    }
+
+    loadFilterOptions();
+    return () => { cancelled = true; };
+  }, [clinicId, token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1348,8 +1387,8 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
     <div className="filters">
       <input className="control" type="date" value={from} onChange={(e) => { setPage(0); setFrom(e.target.value); }} />
       <input className="control" type="date" value={to} onChange={(e) => { setPage(0); setTo(e.target.value); }} />
-      {!isDoctor && <input className="control" type="number" min="1" placeholder="Doctor ID" value={doctorId} onChange={(e) => { setPage(0); setDoctorId(e.target.value); }} />}
-      <input className="control" type="number" min="1" placeholder="Service ID" value={serviceId} onChange={(e) => { setPage(0); setServiceId(e.target.value); }} />
+      {!isDoctor && <select className="control" value={doctorId} onChange={(e) => { setPage(0); setDoctorId(e.target.value); }}><option value="">All Doctors</option>{filterDoctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name || `Doctor ${doctor.id}`}</option>)}</select>}
+      <select className="control" value={serviceId} onChange={(e) => { setPage(0); setServiceId(e.target.value); }}><option value="">All Services</option>{filterServices.map((service) => <option key={service.id} value={service.id}>{service.name || `Service ${service.id}`}</option>)}</select>
       <select className="control" value={status} onChange={(e) => { setPage(0); setStatus(e.target.value); }}><option value="">All Status</option><option value="CONFIRMED">Confirmed</option><option value="CHECKED_IN">Checked In</option><option value="WAITING">Waiting</option><option value="IN_CONSULTATION">In Consultation</option><option value="COMPLETED">Completed</option><option value="NO_SHOW">No Show</option><option value="CANCELLED">Cancelled</option></select>
     </div>
     {error && <div className="auth-error">{error}</div>}
@@ -2266,37 +2305,6 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
   useEffect(() => {
     let cancelled = false;
 
-    async function loadWhatsAppConfig() {
-      if (!token || !clinicId) {
-        setWhatsappConfig({ phoneNumberId: "", wabaId: "", businessAccountId: "", displayPhoneNumber: "", accessToken: "", status: "ACTIVE" });
-        return;
-      }
-
-      try {
-        const result = await getClinicWhatsAppConfig(clinicId, token);
-        const config = result?.data && typeof result.data === "object" ? result.data : result || {};
-        if (!cancelled) {
-          setWhatsappConfig({
-            phoneNumberId: config.phoneNumberId || config.phone_number_id || "",
-            wabaId: config.wabaId || config.waba_id || "",
-            businessAccountId: config.businessAccountId || config.business_account_id || "",
-            displayPhoneNumber: config.displayPhoneNumber || config.display_phone_number || "",
-            accessToken: config.accessToken || config.access_token || "",
-            status: config.status || "ACTIVE",
-          });
-        }
-      } catch (err) {
-        if (!cancelled && err.status !== 404) setError(err.message || "Unable to load WhatsApp configuration.");
-      }
-    }
-
-    loadWhatsAppConfig();
-    return () => { cancelled = true; };
-  }, [clinicId, token]);
-
-  useEffect(() => {
-    let cancelled = false;
-
     async function loadHolidays() {
       if (!token || !clinicId) {
         setHolidayList([]);
@@ -2330,13 +2338,13 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
     let cancelled = false;
 
     async function loadDoctorAvailabilitySchedule() {
-      if (!token || !clinicId || !doctorId) {
+      if (!token || !clinicId || !selectedDoctorId) {
         setDoctorAvailability(defaultDoctorAvailability);
         return;
       }
 
       try {
-        const result = await getDoctorAvailability(clinicId, Number(doctorId), token);
+        const result = await getDoctorAvailability(clinicId, Number(selectedDoctorId), token);
         const items = Array.isArray(result)
           ? result
           : Array.isArray(result?.data)
@@ -2658,41 +2666,9 @@ const handleWhatsAppSignupResponse = async (response) => {
 
         console.log("WhatsApp connected to backend successfully");
 
-        const savedConfig = await getClinicWhatsAppConfig(
-            clinicId,
-            token
-        );
-
-        const config =
-            savedConfig?.data &&
-            typeof savedConfig.data === "object"
-                ? savedConfig.data
-                : savedConfig || {};
-
         setWhatsappConfig((value) => ({
             ...value,
-
-            phoneNumberId:
-                config.phoneNumberId ||
-                config.phone_number_id ||
-                value.phoneNumberId,
-
-            wabaId:
-                config.wabaId ||
-                config.waba_id ||
-                value.wabaId,
-
-            businessAccountId:
-                config.businessAccountId ||
-                config.business_account_id ||
-                value.businessAccountId,
-
-            displayPhoneNumber:
-                config.displayPhoneNumber ||
-                config.display_phone_number ||
-                value.displayPhoneNumber,
-
-            status: config.status || "ACTIVE",
+          status: "ACTIVE",
         }));
 
         showToast("WhatsApp connected successfully");
@@ -2833,6 +2809,7 @@ const handleWhatsAppSignupResponse = async (response) => {
         }} disabled={workingHoursSaving}>{workingHoursSaving ? "Saving..." : "Save Working Hours"}</button>
         </div>}
       {activeTab === "whatsapp" && <div className="mt">
+        {canViewClinicProfile && <>
         <h3>WhatsApp Configuration</h3>
         <p className="muted">Configure the WhatsApp Business connection for this clinic.</p>
         <div className="quick-actions mt">
@@ -2855,6 +2832,7 @@ const handleWhatsAppSignupResponse = async (response) => {
           </div>
         </div>
         <button className="btn btn-primary mt" onClick={handleWhatsAppConfigSave} disabled={whatsappConfigSaving}>{whatsappConfigSaving ? "Saving..." : "Save WhatsApp Configuration"}</button>
+        </>}
         <div className="holiday-settings mt">
           <h3>Clinic QR Code</h3>
           <p className="muted">Generate a WhatsApp QR code for this clinic.</p>
