@@ -87,6 +87,62 @@ export function login(username, password) {
   });
 }
 
+export function getSubscriptionPlans(token) {
+  return request("/api/subscription-plans", {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((payload) => unwrapApiData(payload));
+}
+
+export function getSubscriptionPlan(planId, token) {
+  return request(`/api/subscription-plans/${planId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((payload) => unwrapApiData(payload));
+}
+
+export function updateSubscriptionPlanStatus(planId, active, token) {
+  return request(`/api/subscription-plans/${planId}/status?active=${Boolean(active)}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((payload) => unwrapApiData(payload));
+}
+
+export function getClinicSubscription(clinicId, token) {
+  return request(`/api/clinics/${clinicId}/subscription`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((payload) => unwrapApiData(payload));
+}
+
+export function submitClinicSubscriptionPayment(clinicId, planId, transactionId, token) {
+  return request(`/api/clinics/${clinicId}/subscription/payments`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ planId: Number(planId), transactionId }),
+  }).then((payload) => unwrapApiData(payload));
+}
+
+export function getPendingSubscriptionPayments(token) {
+  return request("/api/admin/subscription/payments/pending", {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((payload) => unwrapApiData(payload));
+}
+
+export function getSubscriptionPayment(paymentId, token) {
+  return request(`/api/admin/subscription/payments/${paymentId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((payload) => unwrapApiData(payload));
+}
+
+export function verifySubscriptionPayment(paymentId, approved, rejectionReason, token) {
+  return request(`/api/admin/subscription/payments/${paymentId}/verify`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      approved: Boolean(approved),
+      ...(approved ? {} : { rejectionReason }),
+    }),
+  }).then((payload) => unwrapApiData(payload));
+}
+
 export function createClinicUser(payload, token) {
   return request("/api/clinic-admin/users", {
     method: "POST",
@@ -531,6 +587,7 @@ export function createNextAppointment(appointmentId, payload, token) {
       appointmentDate: payload.appointmentDate,
       startTime: payload.startTime,
       endTime: payload.endTime,
+      clinicId: payload.clinicId
     }),
   }).then((response) => {
     if (response && typeof response === "object") {
