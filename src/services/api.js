@@ -577,7 +577,7 @@ export function cancelAppointment(appointmentId, token) {
   });
 }
 
-export function createNextAppointment(appointmentId, payload, token) {
+export function createNextAppointment(clinicId,appointmentId, payload, token) {
   return request(`/api/dashboard/appointments/${appointmentId}/next`, {
     method: "POST",
     headers: {
@@ -587,7 +587,7 @@ export function createNextAppointment(appointmentId, payload, token) {
       appointmentDate: payload.appointmentDate,
       startTime: payload.startTime,
       endTime: payload.endTime,
-      clinicId: payload.clinicId
+      clinicId: clinicId
     }),
   }).then((response) => {
     if (response && typeof response === "object") {

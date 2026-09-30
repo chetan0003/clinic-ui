@@ -1329,7 +1329,7 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
       setScheduleError("");
       if (scheduleModal.mode === "next") {
         setCreatingNextAppointmentId(appointmentId);
-        const nextAppointment = await createNextAppointment(appointmentId, {
+        const nextAppointment = await createNextAppointment(clinicId,appointmentId, {
           appointmentDate: scheduleModal.appointmentDate,
           startTime: scheduleModal.startTime,
           endTime: scheduleModal.endTime,
