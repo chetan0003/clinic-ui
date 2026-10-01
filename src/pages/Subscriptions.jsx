@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   getClinicSubscription,
+  getClinicSubscriptionPayments,
   getPendingSubscriptionPayments,
   getSubscriptionPayment,
   getSubscriptionPlan,
@@ -62,7 +63,7 @@ export default function Subscriptions({ clinicId, clinicName, token, isSuperAdmi
   const [rejectionReasons, setRejectionReasons] = useState({});
   const [reviewError, setReviewError] = useState("");
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (submittedPayment = null) => {
     if (!token || (!isSuperAdmin && !clinicId)) {
       setLoading(false);
       setError(!token ? "Please log in to view subscriptions." : "Select a clinic to view its subscription.");
@@ -72,15 +73,28 @@ export default function Subscriptions({ clinicId, clinicName, token, isSuperAdmi
     setLoading(true);
     setError("");
     try {
-      const [plansResult, subscriptionResult, pendingResult] = await Promise.allSettled([
+      const [plansResult, subscriptionResult, pendingResult, clinicPaymentsResult] = await Promise.allSettled([
         getSubscriptionPlans(token),
         clinicId ? getClinicSubscription(clinicId, token) : Promise.resolve(null),
         isSuperAdmin ? getPendingSubscriptionPayments(token) : Promise.resolve([]),
+        !isSuperAdmin && clinicId ? getClinicSubscriptionPayments(clinicId, token) : Promise.resolve([]),
       ]);
       if (plansResult.status === "rejected") throw plansResult.reason;
       setPlans(asList(plansResult.value));
       setSubscription(subscriptionResult.status === "fulfilled" ? subscriptionResult.value || null : null);
       setPendingPayments(pendingResult.status === "fulfilled" ? asList(pendingResult.value) : []);
+      if (clinicPaymentsResult.status === "fulfilled") {
+        const clinicPayments = asList(clinicPaymentsResult.value).slice().sort((left, right) =>
+          new Date(right.paymentDate || 0).getTime() - new Date(left.paymentDate || 0).getTime()
+        );
+        const submittedPaymentId = submittedPayment?.paymentId || submittedPayment?.id;
+        const submittedPaymentFromHistory = submittedPaymentId
+          ? clinicPayments.find((payment) => String(payment.paymentId || payment.id) === String(submittedPaymentId))
+          : null;
+        setLatestPayment(submittedPaymentFromHistory || clinicPayments[0] || submittedPayment || null);
+      } else if (submittedPayment) {
+        setLatestPayment(submittedPayment);
+      }
     } catch (err) {
       setError(err.message || "Unable to load subscription information.");
     } finally {
@@ -101,11 +115,12 @@ export default function Subscriptions({ clinicId, clinicName, token, isSuperAdmi
     setSubmitting(true);
     setError("");
     try {
-      const payment = await submitClinicSubscriptionPayment(clinicId, selectedPlanId, transactionId.trim(), token);
+      const paymentResponse = await submitClinicSubscriptionPayment(clinicId, selectedPlanId, transactionId.trim(), token);
+      const payment = paymentResponse?.data || paymentResponse;
       setLatestPayment(payment);
       setTransactionId("");
       showToast("Payment submitted for verification.");
-      await loadData();
+      await loadData(payment);
     } catch (err) {
       setError(err.message || "Unable to submit payment.");
     } finally {

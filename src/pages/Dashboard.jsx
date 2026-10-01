@@ -2,7 +2,7 @@ import React from "react";
 import { useEffect, useMemo,useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import Subscriptions from "./Subscriptions";
-import { cancelAppointment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, updateClinicPatient, upsertClinicWorkingHours } from "../services/api";
+import { cancelAppointment, collectAppointmentPayment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getAppointmentPayment, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, updateClinicPatient, upsertClinicWorkingHours } from "../services/api";
 
 const pageMeta = {
   dashboard: ["Dashboard", "Good morning. Here's today's clinic overview."],
@@ -39,6 +39,10 @@ function formatTime(time) {
   return `${String(displayHours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${suffix}`;
 }
 
+function formatCurrency(amount) {
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(Number(amount) || 0);
+}
+
 function normalizeTime(time) {
   return time ? String(time).slice(0, 5) : "";
 }
@@ -71,7 +75,7 @@ function Modal({ title, children, onClose, onSave, saveLabel = "Save", saveDisab
 
 export default function Dashboard() {
   const { user, token, logout } = useAuth();
-  const [page, setPage] = useState("dashboard");
+  const [page, setPage] = useState(() => user?.isPlanActive === false && String(user?.role).toUpperCase() !== "SUPER_ADMIN" ? "subscriptions" : "dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [modal, setModal] = useState(null);
@@ -128,7 +132,12 @@ export default function Dashboard() {
   const canManageStaff = ["SUPER_ADMIN", "CLINIC_ADMIN"].includes(String(role).toUpperCase());
   const canManageSettings = ["SUPER_ADMIN", "CLINIC_ADMIN"].includes(String(role).toUpperCase());
   const canViewClinicProfile = String(role).toUpperCase() === "SUPER_ADMIN";
+  const isPlanInactive = user?.isPlanActive === false && !isSuperAdmin;
   const selectedClinicName = clinics.find((clinic) => String(clinic.id) === String(selectedClinicId))?.name || "your clinic";
+
+  useEffect(() => {
+    if (isPlanInactive) setPage("subscriptions");
+  }, [isPlanInactive]);
 
   useEffect(() => {
     let cancelled = false;
@@ -322,6 +331,7 @@ export default function Dashboard() {
           </select>
         </div>
 
+        {!isPlanInactive && <>
         <div className="nav-section">Overview</div>
         <NavButton active={page === "dashboard"} onClick={() => go("dashboard")} icon="▣">Dashboard</NavButton>
 
@@ -334,9 +344,10 @@ export default function Dashboard() {
 
         <div className="nav-section">Administration</div>
         {canManageStaff && <NavButton active={page === "staff"} onClick={() => go("staff")} icon="♙">Staff & Users</NavButton>}
-        {canManageSettings && <NavButton active={page === "subscriptions"} onClick={() => go("subscriptions")} icon="◇">Subscription</NavButton>}
         <NavButton active={page === "reports"} onClick={() => go("reports")} icon="▥">Reports</NavButton>
         {canManageSettings && <NavButton active={page === "settings"} onClick={() => go("settings")} icon="⚙">Settings</NavButton>}
+        </>}
+        {(canManageSettings || isPlanInactive) && <NavButton active={page === "subscriptions"} onClick={() => go("subscriptions")} icon="◇">Subscription</NavButton>}
 
         <div className="sidebar-bottom">
           <div className="user-mini">
@@ -478,7 +489,7 @@ export default function Dashboard() {
 
           {page === "reports" && <Reports showToast={showToast} />}
 
-          {page === "subscriptions" && canManageSettings && <Subscriptions clinicId={selectedClinicId} clinicName={selectedClinicName} token={token} isSuperAdmin={isSuperAdmin} showToast={showToast} />}
+          {page === "subscriptions" && (canManageSettings || isPlanInactive) && <Subscriptions clinicId={selectedClinicId} clinicName={selectedClinicName} token={token} isSuperAdmin={isSuperAdmin} showToast={showToast} />}
 
           {page === "settings" && canManageSettings && <Settings showToast={showToast} clinicId={selectedClinicId} doctorId={userDoctorId || 1} token={token} canViewClinicProfile={canViewClinicProfile} />}
           </>}
@@ -1080,6 +1091,7 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
   const [to, setTo] = useState("");
   const [doctorId, setDoctorId] = useState("");
   const [serviceId, setServiceId] = useState("");
+  const [patientSearch, setPatientSearch] = useState("");
   const [filterDoctors, setFilterDoctors] = useState([]);
   const [filterServices, setFilterServices] = useState([]);
   const [status, setStatus] = useState("");
@@ -1099,6 +1111,13 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(5);
   const [pagination, setPagination] = useState(null);
+  const [paymentAppointment, setPaymentAppointment] = useState(null);
+  const [paymentDetails, setPaymentDetails] = useState(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("UPI");
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentSaving, setPaymentSaving] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
   const isDoctor = String(userRole).toUpperCase() === "DOCTOR";
 
   useEffect(() => {
@@ -1218,16 +1237,97 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
     return () => { cancelled = true; };
   }, [clinicId, token, from, to, doctorId, serviceId, status, isDoctor, userDoctorId, page, pageSize]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPaymentDetails() {
+      if (!paymentAppointment || !token) {
+        setPaymentDetails(null);
+        return;
+      }
+
+      try {
+        setPaymentLoading(true);
+        setPaymentError("");
+        const result = await getAppointmentPayment(paymentAppointment.id, token);
+        if (!cancelled) {
+          const totalAmount = Number(result?.totalAmount) || 0;
+          const isUnpaid = String(paymentAppointment.paymentStatus || "").toUpperCase() === "UNPAID";
+          const details = isUnpaid && totalAmount > 0
+            ? { ...result, paidAmount: 0, remainingAmount: totalAmount, status: "UNPAID" }
+            : result;
+          setPaymentDetails(details);
+          setPaymentAmount(String(details?.remainingAmount ?? ""));
+        }
+      } catch (err) {
+        if (!cancelled) setPaymentError(err.message || "Unable to load payment details.");
+      } finally {
+        if (!cancelled) setPaymentLoading(false);
+      }
+    }
+
+    loadPaymentDetails();
+    return () => { cancelled = true; };
+  }, [paymentAppointment, token]);
+
   const filteredRows = rows.filter((appointment) => {
     const query = search.trim().toLowerCase();
-    return !query || [appointment.patientName, appointment.serviceName, appointment.doctorName]
+    const patientQuery = patientSearch.trim().toLowerCase();
+    const matchesGlobalSearch = !query || [appointment.patientName, appointment.phoneNo, appointment.patientPhone, appointment.serviceName, appointment.doctorName]
       .some((value) => String(value || "").toLowerCase().includes(query));
+    const matchesPatientSearch = !patientQuery || [appointment.patientName, appointment.phoneNo, appointment.patientPhone]
+      .some((value) => String(value || "").toLowerCase().includes(patientQuery));
+    return matchesGlobalSearch && matchesPatientSearch;
   });
   const currentPage = Number(pagination?.number ?? pagination?.pageNumber ?? page) || 0;
   const totalPages = Number(pagination?.totalPages) > 0 ? Number(pagination.totalPages) : null;
   const hasNextPage = totalPages !== null ? currentPage < totalPages - 1 : rows.length >= pageSize;
+  const today = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  })();
+
+  function isAppointmentToday(appointment) {
+    return String(appointment.appointmentDate || appointment.date || "").slice(0, 10) === today;
+  }
+
+  function openPaymentDialog(appointment) {
+    setPaymentAppointment(appointment);
+    setPaymentDetails(null);
+    setPaymentAmount("");
+    setPaymentMethod("UPI");
+    setPaymentError("");
+  }
+
+  async function handleCollectPayment() {
+    const amount = Number(paymentAmount);
+    const remainingAmount = Number(paymentDetails?.remainingAmount);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > remainingAmount) {
+      setPaymentError(`Enter an amount greater than 0 and no more than ${remainingAmount}.`);
+      return;
+    }
+
+    try {
+      setPaymentSaving(true);
+      setPaymentError("");
+      const result = await collectAppointmentPayment(paymentAppointment.id, { amount, paymentMethod }, token);
+      setPaymentDetails(result);
+      setPaymentAmount(String(result?.remainingAmount ?? ""));
+      setRows((items) => items.map((item) => String(item.id) === String(paymentAppointment.id)
+        ? { ...item, paymentStatus: result?.status || item.paymentStatus }
+        : item));
+      showToast("Payment collected successfully");
+    } catch (err) {
+      setPaymentError(err.message || "Unable to collect payment.");
+    } finally {
+      setPaymentSaving(false);
+    }
+  }
 
   async function handleStatusUpdate(appointmentId, nextStatus) {
+    const appointment = rows.find((item) => String(item.id) === String(appointmentId));
+    if (!appointment || !isAppointmentToday(appointment)) return;
+
     if (!token) {
       setError("Please log in to update appointments.");
       return;
@@ -1385,6 +1485,7 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
   <section className="page active"><div className="card">
     <div className="card-header"><div><h3>Appointments</h3><p>Manage and monitor clinic appointments</p></div><button className="btn btn-primary" onClick={() => openModal("appointment")}>+ New Appointment</button></div>
     <div className="filters">
+      <input className="control" type="search" placeholder="Search patient name or phone" value={patientSearch} onChange={(e) => { setPage(0); setPatientSearch(e.target.value); }} />
       <input className="control" type="date" value={from} onChange={(e) => { setPage(0); setFrom(e.target.value); }} />
       <input className="control" type="date" value={to} onChange={(e) => { setPage(0); setTo(e.target.value); }} />
       {!isDoctor && <select className="control" value={doctorId} onChange={(e) => { setPage(0); setDoctorId(e.target.value); }}><option value="">All Doctors</option>{filterDoctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name || `Doctor ${doctor.id}`}</option>)}</select>}
@@ -1394,8 +1495,39 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
     {error && <div className="auth-error">{error}</div>}
     {loading && <div className="card-body"><p className="muted">Loading appointments...</p></div>}
     {!loading && !error && filteredRows.length === 0 && <div className="card-body"><p className="muted">No appointments found.</p></div>}
-    {!loading && !error && filteredRows.length > 0 && <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Service</th><th>Doctor</th><th>Date</th><th>Time</th><th>Status</th><th>Suggested Follow-Up</th><th>Action</th></tr></thead><tbody>
-      {filteredRows.map((appointment) => { const action = getAppointmentAction(appointment); const isUpdating = updatingAppointmentId === appointment.id; const isCancelling = cancelingAppointmentId === appointment.id; const isCreatingNext = creatingNextAppointmentId === appointment.id; const isRescheduling = reschedulingAppointmentId === appointment.id; const appointmentStatus = String(appointment.status || "").toUpperCase(); const statusClass = appointmentStatus === "IN_CONSULTATION" ? "in_progress" : appointmentStatus.toLowerCase(); return <tr key={appointment.id}><td><div className="patient-cell"><div className="small-avatar">{initials({ firstName: appointment.patientName })}</div><div><strong>{appointment.patientName || "-"}</strong><span>{appointment.phoneNo || appointment.patientPhone || "-"}</span></div></div></td><td>{appointment.serviceName || appointment.service?.name || "-"}</td><td>{appointment.doctorName || appointment.doctor?.name || "-"}</td><td>{appointment.appointmentDate || appointment.date || "-"}</td><td>{formatTime(appointment.startTime || appointment.time)}</td><td><span className={`status ${statusClass}`}>{appointment.status || "-"}</span></td><td>{appointment.suggestedFollowUpDate || "-"}</td><td><div className="row-actions">{action && <button className="btn btn-light icon-btn" title={isUpdating ? "Updating..." : action.label} disabled={isUpdating} onClick={() => handleStatusUpdate(appointment.id, action.nextStatus)} aria-label={isUpdating ? "Updating..." : action.label}>{isUpdating ? "…" : action.label === "Mark Completed" ? "✓" : "→"}</button>}{canCreateNextAppointment(appointment) && <button className="btn btn-light icon-btn" title={isCreatingNext ? "Creating..." : "Next Visit"} disabled={isCreatingNext} onClick={() => handleCreateNextAppointment(appointment)} aria-label={isCreatingNext ? "Creating..." : "Next Visit"}>{isCreatingNext ? "…" : "+"}</button>}<button className="btn btn-light icon-btn" title={isRescheduling ? "Rescheduling..." : "Reschedule"} disabled={isRescheduling} onClick={() => handleRescheduleAppointment(appointment)} aria-label={isRescheduling ? "Rescheduling..." : "Reschedule"}>{isRescheduling ? "…" : "↺"}</button>{canCancelAppointment(appointment) && <button className="btn btn-danger icon-btn" title={isCancelling ? "Cancelling..." : "Cancel"} disabled={isCancelling} onClick={() => handleCancelAppointment(appointment.id)} aria-label={isCancelling ? "Cancelling..." : "Cancel"}>{isCancelling ? "…" : "✕"}</button>}</div></td></tr>; })}
+    {!loading && !error && filteredRows.length > 0 && <div className="table-wrap"><table><thead><tr><th>Patient</th><th>Service</th><th>Doctor</th><th>Date</th><th>Time</th><th>Status</th><th>Payment</th><th>Follow-Up</th><th>Action</th></tr></thead><tbody>
+      {filteredRows.map((appointment) => {
+        const action = isAppointmentToday(appointment) ? getAppointmentAction(appointment) : null;
+        const isUpdating = updatingAppointmentId === appointment.id;
+        const isCancelling = cancelingAppointmentId === appointment.id;
+        const isCreatingNext = creatingNextAppointmentId === appointment.id;
+        const isRescheduling = reschedulingAppointmentId === appointment.id;
+        const appointmentStatus = String(appointment.status || "").toUpperCase();
+        const statusClass = appointmentStatus === "IN_CONSULTATION" ? "in_progress" : appointmentStatus.toLowerCase();
+        const paymentStatus = String(appointment.paymentStatus || "-").toUpperCase();
+        const paymentStatusClass = { UNPAID: "pending", PARTIAL: "in_progress", PAID: "completed", REFUNDED: "cancelled" }[paymentStatus] || "";
+        const canCollectPayment = appointmentStatus === "COMPLETED" && ["UNPAID", "PARTIAL"].includes(paymentStatus);
+
+        return <tr key={appointment.id}>
+          <td><div className="patient-cell"><div className="small-avatar">{initials({ firstName: appointment.patientName })}</div><div><strong>{appointment.patientName || "-"}</strong><span>{appointment.phoneNo || appointment.patientPhone || "-"}</span></div></div></td>
+          <td>{appointment.serviceName || appointment.service?.name || "-"}</td>
+          <td>{appointment.doctorName || appointment.doctor?.name || "-"}</td>
+          <td>{appointment.appointmentDate || appointment.date || "-"}</td>
+          <td>{formatTime(appointment.startTime || appointment.time)}</td>
+          <td><span className={`status ${statusClass}`}>{appointment.status || "-"}</span></td>
+          <td>{canCollectPayment
+            ? <button type="button" className={`status ${paymentStatusClass}`} onClick={() => openPaymentDialog(appointment)}>{paymentStatus}</button>
+            : <span className={`status ${paymentStatusClass}`}>{paymentStatus}</span>}
+          </td>
+          <td>{appointment.suggestedFollowUpDate || "-"}</td>
+          <td><div className="row-actions">
+            {action && <button className="btn btn-light icon-btn" title={isUpdating ? "Updating..." : action.label} disabled={isUpdating} onClick={() => handleStatusUpdate(appointment.id, action.nextStatus)} aria-label={isUpdating ? "Updating..." : action.label}>{isUpdating ? "…" : action.label === "Mark Completed" ? "✓" : "→"}</button>}
+            {canCreateNextAppointment(appointment) && <button className="btn btn-light icon-btn" title={isCreatingNext ? "Creating..." : "Next Visit"} disabled={isCreatingNext} onClick={() => handleCreateNextAppointment(appointment)} aria-label={isCreatingNext ? "Creating..." : "Next Visit"}>{isCreatingNext ? "…" : "+"}</button>}
+            <button className="btn btn-light icon-btn" title={isRescheduling ? "Rescheduling..." : "Reschedule"} disabled={isRescheduling} onClick={() => handleRescheduleAppointment(appointment)} aria-label={isRescheduling ? "Rescheduling..." : "Reschedule"}>{isRescheduling ? "…" : "↺"}</button>
+            {canCancelAppointment(appointment) && <button className="btn btn-danger icon-btn" title={isCancelling ? "Cancelling..." : "Cancel"} disabled={isCancelling} onClick={() => handleCancelAppointment(appointment.id)} aria-label={isCancelling ? "Cancelling..." : "Cancel"}>{isCancelling ? "…" : "✕"}</button>}
+          </div></td>
+        </tr>;
+      })}
     </tbody></table></div>}
     {!loading && !error && <div className="pagination">
       <button className="btn btn-light" disabled={page === 0} onClick={() => handlePageChange(-1)}>Previous</button>
@@ -1442,6 +1574,36 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
       {scheduleModal.mode === "reschedule" && <Field label="Reason" value={scheduleModal.reason} onChange={(e) => setScheduleModal((value) => ({ ...value, reason: e.target.value }))} />}
     </div>
     {scheduleError && <div className="auth-error" style={{ marginTop: 12 }}>{scheduleError}</div>}
+  </Modal>}
+  {paymentAppointment && <Modal
+    title="Collect Payment"
+    onClose={() => { setPaymentAppointment(null); setPaymentDetails(null); setPaymentError(""); }}
+    onSave={handleCollectPayment}
+    saveLabel={paymentSaving ? "Collecting..." : "Collect"}
+    saveDisabled={paymentLoading || paymentSaving || !paymentDetails || Number(paymentDetails.remainingAmount) <= 0}
+  >
+    {paymentLoading && <p className="muted">Loading payment details...</p>}
+    {paymentDetails && <>
+      <div className="info-line"><span>Patient</span><strong>{paymentAppointment.patientName || "-"}</strong></div>
+      <div className="info-line"><span>Service</span><strong>{paymentAppointment.serviceName || paymentAppointment.service?.name || "-"}</strong></div>
+      <div className="info-line"><span>Total Amount</span><strong>{formatCurrency(paymentDetails.totalAmount)}</strong></div>
+      <div className="info-line"><span>Paid Amount</span><strong>{formatCurrency(paymentDetails.paidAmount)}</strong></div>
+      <div className="info-line"><span>Remaining</span><strong>{formatCurrency(paymentDetails.remainingAmount)}</strong></div>
+      {Number(paymentDetails.remainingAmount) > 0 && <div className="form-grid mt">
+        <Field label="Amount" type="number" min="0.01" max={paymentDetails.remainingAmount} step="0.01" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
+        <div className="field">
+          <label>Payment Method</label>
+          <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+            <option value="CASH">Cash</option>
+            <option value="UPI">UPI</option>
+            <option value="CARD">Card</option>
+            <option value="BANK_TRANSFER">Bank Transfer</option>
+            <option value="ONLINE">Online</option>
+          </select>
+        </div>
+      </div>}
+    </>}
+    {paymentError && <div className="auth-error" style={{ marginTop: 12 }}>{paymentError}</div>}
   </Modal>}
   </>;
 }

@@ -112,6 +112,12 @@ export function getClinicSubscription(clinicId, token) {
   }).then((payload) => unwrapApiData(payload));
 }
 
+export function getClinicSubscriptionPayments(clinicId, token) {
+  return request(`/api/clinics/${clinicId}/subscription/payments`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((payload) => unwrapApiData(payload));
+}
+
 export function submitClinicSubscriptionPayment(clinicId, planId, transactionId, token) {
   return request(`/api/clinics/${clinicId}/subscription/payments`, {
     method: "POST",
@@ -544,6 +550,27 @@ export function getClinicAppointments(clinicId, filters, token) {
 
     return list;
   });
+}
+
+export function getAppointmentPayment(appointmentId, token) {
+  return request(`/api/appointments/${appointmentId}/payment`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  }).then((payload) => unwrapApiData(payload));
+}
+
+export function collectAppointmentPayment(appointmentId, payload, token) {
+  return request(`/api/appointments/${appointmentId}/payment`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      amount: Number(payload.amount),
+      paymentMethod: payload.paymentMethod,
+    }),
+  }).then((response) => unwrapApiData(response));
 }
 
 export function updateAppointmentStatus(appointmentId, status, token) {

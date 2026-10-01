@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { login as loginApi } from "../services/api";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { getUserClinics, login as loginApi } from "../services/api";
 
 const AuthContext = createContext(null);
 
@@ -39,6 +39,43 @@ export function AuthProvider({ children }) {
       return null;
     }
   });
+  const [profileLoading, setProfileLoading] = useState(() => Boolean(localStorage.getItem("clinicflow_token")));
+  const [profileError, setProfileError] = useState("");
+
+  const refreshUser = useCallback(async () => {
+    if (!token || !user?.username) {
+      setProfileLoading(false);
+      return null;
+    }
+
+    setProfileLoading(true);
+    setProfileError("");
+    try {
+      const result = await getUserClinics(user.username, token);
+      const profile = result?.data?.user || result?.user || result?.data || result;
+      if (!profile || typeof profile !== "object" || typeof profile.isPlanActive !== "boolean") {
+        throw new Error("Unable to verify your clinic subscription status.");
+      }
+
+      const updatedUser = { ...user, ...profile };
+      localStorage.setItem("clinicflow_user", JSON.stringify(updatedUser));
+      setUser(updatedUser);
+      return updatedUser;
+    } catch (err) {
+      setProfileError(err.message || "Unable to verify your account access.");
+      throw err;
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [token, user?.username]);
+
+  useEffect(() => {
+    if (token && user?.username) {
+      refreshUser().catch(() => {});
+    } else {
+      setProfileLoading(false);
+    }
+  }, [refreshUser, token, user?.username]);
 
   useEffect(() => {
     function handleUnauthorized() {
@@ -46,6 +83,8 @@ export function AuthProvider({ children }) {
       localStorage.removeItem("clinicflow_user");
       setToken(null);
       setUser(null);
+      setProfileLoading(false);
+      setProfileError("");
     }
 
     window.addEventListener("clinicflow:unauthorized", handleUnauthorized);
@@ -63,6 +102,8 @@ export function AuthProvider({ children }) {
     }
 
     const newUser = extractUser(data, username);
+    setProfileLoading(true);
+    setProfileError("");
     localStorage.setItem("clinicflow_token", newToken);
     localStorage.setItem("clinicflow_user", JSON.stringify(newUser));
     setToken(newToken);
@@ -76,6 +117,8 @@ export function AuthProvider({ children }) {
     localStorage.removeItem("clinicflow_user");
     setToken(null);
     setUser(null);
+    setProfileLoading(false);
+    setProfileError("");
   }
 
   const value = useMemo(
@@ -83,10 +126,13 @@ export function AuthProvider({ children }) {
       token,
       user,
       isAuthenticated: Boolean(token),
+      profileLoading,
+      profileError,
+      refreshUser,
       login,
       logout,
     }),
-    [token, user]
+    [token, user, profileLoading, profileError, refreshUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
