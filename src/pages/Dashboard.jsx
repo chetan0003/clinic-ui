@@ -2269,10 +2269,19 @@ function Reports({ showToast }) {
 }
 
 function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }) {
+  const clinicProfileFormRef = useRef(null);
   const [form, setForm] = useState({
     name: "Sunrise Multispeciality",
     whatsappNumber: "+91 98765 43210",
     timezone: "Asia/Kolkata",
+    countryCode: "IN",
+    state: "",
+    city: "",
+    postalCode: "",
+    addressLine1: "",
+    addressLine2: "",
+    latitude: "",
+    longitude: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -2560,6 +2569,14 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
         name: form.name.trim(),
         whatsappNumber: form.whatsappNumber.trim(),
         timezone: form.timezone,
+        countryCode: form.countryCode.trim(),
+        state: form.state.trim(),
+        city: form.city.trim(),
+        postalCode: form.postalCode.trim(),
+        addressLine1: form.addressLine1.trim(),
+        addressLine2: form.addressLine2.trim(),
+        latitude: form.latitude === "" ? null : Number(form.latitude),
+        longitude: form.longitude === "" ? null : Number(form.longitude),
       };
       let createdClinic = null;
       if (editingClinicId === null) {
@@ -2583,18 +2600,28 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
   }
 
   function editClinic(clinic) {
+    setActiveTab("profile");
     setEditingClinicId(clinic.id);
     setForm({
       name: clinic.name || "",
       whatsappNumber: clinic.whatsappNumber || "",
       timezone: clinic.timezone || "Asia/Kolkata",
+      countryCode: clinic.countryCode || "",
+      state: clinic.state || "",
+      city: clinic.city || "",
+      postalCode: clinic.postalCode || "",
+      addressLine1: clinic.addressLine1 || "",
+      addressLine2: clinic.addressLine2 || "",
+      latitude: clinic.latitude ?? "",
+      longitude: clinic.longitude ?? "",
     });
     setError("");
+    clinicProfileFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function cancelEdit() {
     setEditingClinicId(null);
-    setForm({ name: "", whatsappNumber: "", timezone: "Asia/Kolkata" });
+    setForm({ name: "", whatsappNumber: "", timezone: "Asia/Kolkata", countryCode: "", state: "", city: "", postalCode: "", addressLine1: "", addressLine2: "", latitude: "", longitude: "" });
     setError("");
   }
 
@@ -2863,19 +2890,27 @@ const handleWhatsAppSignupResponse = async (response) => {
     </div>
     <div className="settings-main">
       {error && <div className="auth-error">{error}</div>}
-      {activeTab === "profile" && canViewClinicProfile && <><h3>Clinic Profile</h3><p className="muted">Basic information displayed across your clinic dashboard.</p>
+      {activeTab === "profile" && canViewClinicProfile && <div ref={clinicProfileFormRef} style={{ scrollMarginTop: 24 }}><h3>Clinic Profile</h3><p className="muted">Basic information displayed across your clinic dashboard.</p>
       {editingClinicId !== null && <div className="auth-warning">Editing clinic #{editingClinicId}</div>}
       <div className="form-grid mt">
         <Field label="Clinic Name" value={form.name} onChange={(e) => setForm((value) => ({ ...value, name: e.target.value }))} />
         <Field label="Clinic ID" value={clinicId} disabled />
         <Field label="WhatsApp Number" value={form.whatsappNumber} onChange={(e) => setForm((value) => ({ ...value, whatsappNumber: e.target.value }))} />
         <Field label="Timezone" select options={["Asia/Kolkata"]} value={form.timezone} onChange={(e) => setForm((value) => ({ ...value, timezone: e.target.value }))} />
+        <Field label="Country Code" value={form.countryCode} onChange={(e) => setForm((value) => ({ ...value, countryCode: e.target.value }))} placeholder="IN" />
+        <Field label="State" value={form.state} onChange={(e) => setForm((value) => ({ ...value, state: e.target.value }))} />
+        <Field label="City" value={form.city} onChange={(e) => setForm((value) => ({ ...value, city: e.target.value }))} />
+        <Field label="Postal Code" value={form.postalCode} onChange={(e) => setForm((value) => ({ ...value, postalCode: e.target.value }))} />
+        <Field label="Address Line 1" value={form.addressLine1} onChange={(e) => setForm((value) => ({ ...value, addressLine1: e.target.value }))} />
+        <Field label="Address Line 2" value={form.addressLine2} onChange={(e) => setForm((value) => ({ ...value, addressLine2: e.target.value }))} />
+        <Field label="Latitude" type="number" step="any" value={form.latitude} onChange={(e) => setForm((value) => ({ ...value, latitude: e.target.value }))} />
+        <Field label="Longitude" type="number" step="any" value={form.longitude} onChange={(e) => setForm((value) => ({ ...value, longitude: e.target.value }))} />
       </div>
       <div className="quick-actions mt">
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? "Saving..." : editingClinicId === null ? "Save Changes" : "Update Clinic"}</button>
         {editingClinicId !== null && <button className="btn btn-outline" onClick={cancelEdit} disabled={saving}>Cancel Edit</button>}
       </div>
-      </>}
+      </div>}
       {activeTab === "profile" && <div className="mt">
         <h3>Saved Clinic Profiles</h3>
         {loadingClinics && <p className="muted">Loading clinic profiles...</p>}
