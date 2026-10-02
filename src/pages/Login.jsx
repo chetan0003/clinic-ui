@@ -90,9 +90,9 @@ export default function Login({ onSignup }) {
           </div>
         </div>
 
-        <div className="auth-note">
+        {/* <div className="auth-note">
           API: <code>POST /api/auth/login</code>
-        </div>
+        </div> */}
       </div>
     </div>
   );

@@ -552,6 +552,38 @@ export function getClinicAppointments(clinicId, filters, token) {
   });
 }
 
+export function getClinicNotifications(clinicId, { page = 0, size = 20 } = {}, token) {
+  const query = new URLSearchParams({ page: String(page), size: String(size) });
+  return request(`/api/dashboard/clinic/${clinicId}/notifications?${query.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((payload) => {
+    const data = unwrapApiData(payload);
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.content)) return data.content;
+    return [];
+  });
+}
+
+export function getClinicUnreadNotificationCount(clinicId, token) {
+  return request(`/api/dashboard/clinic/${clinicId}/unread/count`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((payload) => Number(payload?.data ?? payload?.count ?? payload) || 0);
+}
+
+export function markClinicNotificationRead(clinicId, notificationId, token) {
+  return request(`/api/dashboard/clinic/${clinicId}/notification/${notificationId}/read`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function markAllClinicNotificationsRead(clinicId, token) {
+  return request(`/api/dashboard/clinic/${clinicId}/read-all`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 export function getAppointmentPayment(appointmentId, token) {
   return request(`/api/appointments/${appointmentId}/payment`, {
     headers: {

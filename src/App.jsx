@@ -1,5 +1,5 @@
 import React from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "./context/AuthContext";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -8,6 +8,12 @@ import Dashboard from "./pages/Dashboard";
 export default function App() {
   const { isAuthenticated, profileLoading, profileError, refreshUser, logout } = useAuth();
   const [authPage, setAuthPage] = useState("login");
+  const [theme, setTheme] = useState(() => localStorage.getItem("clinicflow_theme") === "dark" ? "dark" : "light");
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("clinicflow_theme", theme);
+  }, [theme]);
 
   if (!isAuthenticated) {
     return authPage === "login" ? (
@@ -31,5 +37,5 @@ export default function App() {
     </div></div></div>;
   }
 
-  return <Dashboard />;
+  return <Dashboard theme={theme} onToggleTheme={() => setTheme((current) => current === "dark" ? "light" : "dark")} />;
 }

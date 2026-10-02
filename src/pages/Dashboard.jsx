@@ -2,7 +2,7 @@ import React from "react";
 import { useEffect, useMemo,useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import Subscriptions from "./Subscriptions";
-import { cancelAppointment, collectAppointmentPayment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getAppointmentPayment, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUsers, getClinicWeeklyAppointments, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, updateClinicPatient, upsertClinicWorkingHours } from "../services/api";
+import { cancelAppointment, collectAppointmentPayment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getAppointmentPayment, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicNotifications, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUnreadNotificationCount, getClinicUsers, getClinicWeeklyAppointments, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, markAllClinicNotificationsRead, markClinicNotificationRead, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, updateClinicPatient, upsertClinicWorkingHours } from "../services/api";
 
 const pageMeta = {
   dashboard: ["Dashboard", "Good morning. Here's today's clinic overview."],
@@ -43,6 +43,18 @@ function formatCurrency(amount) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(Number(amount) || 0);
 }
 
+function formatNotificationTime(value) {
+  if (!value) return "";
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return String(value);
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+  if (elapsedMinutes < 1) return "Just now";
+  if (elapsedMinutes < 60) return `${elapsedMinutes} minute${elapsedMinutes === 1 ? "" : "s"} ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours} hour${elapsedHours === 1 ? "" : "s"} ago`;
+  return new Date(timestamp).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
 function normalizeTime(time) {
   return time ? String(time).slice(0, 5) : "";
 }
@@ -73,7 +85,7 @@ function Modal({ title, children, onClose, onSave, saveLabel = "Save", saveDisab
   );
 }
 
-export default function Dashboard() {
+export default function Dashboard({ theme, onToggleTheme }) {
   const { user, token, logout } = useAuth();
   const [page, setPage] = useState(() => user?.isPlanActive === false && String(user?.role).toUpperCase() !== "SUPER_ADMIN" ? "subscriptions" : "dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -119,6 +131,14 @@ export default function Dashboard() {
   const [selectedClinicId, setSelectedClinicId] = useState(user?.clinicId || "");
   const [userDoctorId, setUserDoctorId] = useState(user?.doctorId || user?.doctor?.id || "");
   const [clinicsLoading, setClinicsLoading] = useState(true);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState("");
+  const [notificationActionId, setNotificationActionId] = useState(null);
+  const [markingAllNotificationsRead, setMarkingAllNotificationsRead] = useState(false);
+  const notificationMenuRef = useRef(null);
 
   const displayName =
     `${user?.firstName || ""} ${user?.lastName || ""}`.trim() ||
@@ -178,6 +198,57 @@ export default function Dashboard() {
     loadUserClinics();
     return () => { cancelled = true; };
   }, [token, user?.username, role]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!token || !selectedClinicId) {
+      setNotifications([]);
+      setUnreadNotificationCount(0);
+      setNotificationsLoading(false);
+      return undefined;
+    }
+
+    async function refreshNotifications() {
+      try {
+        const [notificationResult, unreadResult] = await Promise.allSettled([
+          getClinicNotifications(selectedClinicId, { page: 0, size: 20 }, token),
+          getClinicUnreadNotificationCount(selectedClinicId, token),
+        ]);
+        if (cancelled) return;
+
+        if (notificationResult.status === "fulfilled") {
+          setNotifications(Array.isArray(notificationResult.value) ? notificationResult.value : []);
+        }
+        if (unreadResult.status === "fulfilled") {
+          setUnreadNotificationCount(Number(unreadResult.value) || 0);
+        }
+        const failure = notificationResult.status === "rejected" ? notificationResult.reason : unreadResult.status === "rejected" ? unreadResult.reason : null;
+        setNotificationsError(failure?.message || "");
+      } catch (err) {
+        if (!cancelled) setNotificationsError(err.message || "Unable to load notifications.");
+      } finally {
+        if (!cancelled) setNotificationsLoading(false);
+      }
+    }
+
+    setNotificationsLoading(true);
+    refreshNotifications();
+    const intervalId = window.setInterval(refreshNotifications, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [selectedClinicId, token]);
+
+  useEffect(() => {
+    function closeNotificationMenu(event) {
+      if (!notificationMenuRef.current?.contains(event.target)) setNotificationsOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeNotificationMenu);
+    return () => document.removeEventListener("pointerdown", closeNotificationMenu);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -315,6 +386,39 @@ export default function Dashboard() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  async function openNotification(notification) {
+    if (!notification.read) {
+      try {
+        setNotificationActionId(notification.id);
+        await markClinicNotificationRead(selectedClinicId, notification.id, token);
+        setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, read: true } : item));
+        setUnreadNotificationCount((count) => Math.max(0, count - 1));
+      } catch (err) {
+        showToast(err.message || "Unable to mark notification as read.");
+      } finally {
+        setNotificationActionId(null);
+      }
+    }
+
+    setNotificationsOpen(false);
+    if (notification.appointmentId) go("appointments");
+  }
+
+  async function markAllNotificationsRead() {
+    if (!selectedClinicId || unreadNotificationCount === 0) return;
+
+    try {
+      setMarkingAllNotificationsRead(true);
+      await markAllClinicNotificationsRead(selectedClinicId, token);
+      setNotifications((items) => items.map((item) => ({ ...item, read: true })));
+      setUnreadNotificationCount(0);
+    } catch (err) {
+      showToast(err.message || "Unable to mark notifications as read.");
+    } finally {
+      setMarkingAllNotificationsRead(false);
+    }
+  }
+
   return (
     <div className="app">
       <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
@@ -379,7 +483,38 @@ export default function Dashboard() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <button className="icon-btn" onClick={() => showToast("No new notifications")}>♢</button>
+            <button className="icon-btn theme-toggle" onClick={onToggleTheme} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
+              {theme === "dark" ? "☀" : "☾"}
+            </button>
+            <div className="notification-menu" ref={notificationMenuRef}>
+              <button className="icon-btn notification-trigger" onClick={() => setNotificationsOpen((open) => !open)} aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ""}`} aria-expanded={notificationsOpen}>
+                ♢
+                {unreadNotificationCount > 0 && <span className="notification-count">{unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}</span>}
+              </button>
+              {notificationsOpen && <section className="notification-panel" aria-label="Notifications">
+                <header className="notification-panel-header">
+                  <div><h2>Notifications</h2>{unreadNotificationCount > 0 && <span className="notification-unread-count">{unreadNotificationCount} unread</span>}</div>
+                  <div className="notification-panel-controls">
+                    <button type="button" className="notification-mark-all" onClick={markAllNotificationsRead} disabled={markingAllNotificationsRead || unreadNotificationCount === 0}>{markingAllNotificationsRead ? "Marking..." : "Mark all read"}</button>
+                    <button type="button" className="notification-close" onClick={() => setNotificationsOpen(false)} aria-label="Close notifications">×</button>
+                  </div>
+                </header>
+                {notificationsError && <div className="notification-error">{notificationsError}</div>}
+                <div className="notification-list">
+                  {notificationsLoading && notifications.length === 0 && <p className="notification-empty">Loading notifications...</p>}
+                  {!notificationsLoading && notifications.length === 0 && <p className="notification-empty">You&apos;re all caught up.</p>}
+                  {notifications.map((notification) => <button type="button" className={`notification-item ${notification.read ? "read" : "unread"}`} key={notification.id} onClick={() => openNotification(notification)} disabled={notificationActionId === notification.id}>
+                    <span className="notification-type-icon" aria-hidden="true">{String(notification.type || "").includes("APPOINTMENT") ? "▣" : "◇"}</span>
+                    <span className="notification-item-content">
+                      <strong>{notification.title || "Notification"}</strong>
+                      <span className="notification-message">{notification.message || ""}</span>
+                      <time>{formatNotificationTime(notification.createdAt)}</time>
+                    </span>
+                    {!notification.read && <span className="notification-new-label">New</span>}
+                  </button>)}
+                </div>
+              </section>}
+            </div>
             <div className="profile">
               <div className="avatar">{avatar}</div>
               <div className="profile-text">
@@ -1599,6 +1734,7 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
             <option value="CARD">Card</option>
             <option value="BANK_TRANSFER">Bank Transfer</option>
             <option value="ONLINE">Online</option>
+            <option value="FREE">Online</option>
           </select>
         </div>
       </div>}
