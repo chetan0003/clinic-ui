@@ -237,7 +237,7 @@ export default function Subscriptions({ clinicId, clinicName, token, isSuperAdmi
       </section>
       <section className="card subscription-payment-card">
         <div className="card-header"><div><h3>Latest payment submission</h3><p>Payment references require super-admin verification before activation.</p></div></div>
-        {latestPayment ? <div className="subscription-history-list"><div className="subscription-history-row"><div><strong>{latestPayment.planName || selectedPlan?.name || "Subscription plan"}</strong><span>{latestPayment.transactionId || "No transaction ID"} · {formatDate(latestPayment.paymentDate)}</span></div><span className={statusClass(latestPayment.status)}>{latestPayment.status || "PENDING"}</span><strong>{formatPrice(latestPayment.amount)}</strong></div></div> : <div className="card-body"><p className="muted">No payment has been submitted during this session.</p></div>}
+        {latestPayment ? <div className="subscription-history-list"><div className="subscription-history-row"><div><strong>{latestPayment.planName || selectedPlan?.name || "Subscription plan"}</strong><span>{latestPayment.transactionId || "No transaction ID"} · {formatDate(latestPayment.paymentDate)}</span></div><div className="subscription-submitted-by"><small>Submitted by</small><strong>{latestPayment.submittedBy || "—"}</strong></div><span className={statusClass(latestPayment.status)}>{latestPayment.status || "PENDING"}</span><strong>{formatPrice(latestPayment.amount)}</strong></div></div> : <div className="card-body"><p className="muted">No payment has been submitted during this session.</p></div>}
       </section>
     </div>}
 

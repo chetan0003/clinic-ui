@@ -488,6 +488,16 @@ export function createClinicHoliday(clinicId, payload, token) {
   });
 }
 
+export function deleteClinicHoliday(clinicId, holidayId, token) {
+  return request(`/api/dashboard/clinics/${clinicId}/holidays/${holidayId}`, {
+    method: "DELETE",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
 export function createClinicAppointment(clinicId, payload, token) {
   return request(`/api/dashboard/clinics/${clinicId}/appointments`, {
     method: "POST",
@@ -501,6 +511,7 @@ export function createClinicAppointment(clinicId, payload, token) {
       appointmentDate: payload.appointmentDate,
       startTime: payload.startTime,
       endTime: payload.endTime,
+      idempotencyKey: payload.appointmentCode
     }),
   }).then((response) => {
     if (response && typeof response === "object") {
@@ -513,6 +524,7 @@ export function createClinicAppointment(clinicId, payload, token) {
 
 export function getClinicAppointments(clinicId, filters, token) {
   const query = new URLSearchParams();
+  if (filters.appointmentId) query.set("appointmentId", String(filters.appointmentId));
   if (filters.from) query.set("from", filters.from);
   if (filters.to) query.set("to", filters.to);
   if (filters.doctorId) query.set("doctorId", filters.doctorId);
@@ -711,6 +723,20 @@ export function updateClinicProfile(clinicId, payload, token) {
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(payload),
+  });
+}
+
+export function getClinicWorkingHours(clinicId, token) {
+  return request(`/api/dashboard/clinics/${clinicId}/working-hours`, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  }).then((payload) => {
+    const data = unwrapApiData(payload);
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.content)) return data.content;
+    return [];
   });
 }
 

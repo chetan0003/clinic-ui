@@ -2,7 +2,7 @@ import React from "react";
 import { useEffect, useMemo,useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import Subscriptions from "./Subscriptions";
-import { cancelAppointment, collectAppointmentPayment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getAppointmentPayment, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicNotifications, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUnreadNotificationCount, getClinicUsers, getClinicWeeklyAppointments, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, markAllClinicNotificationsRead, markClinicNotificationRead, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, updateClinicPatient, upsertClinicWorkingHours } from "../services/api";
+import { cancelAppointment, collectAppointmentPayment, connectClinicWhatsApp, createClinicAppointment, createClinicDoctor, createClinicHoliday, createClinicPatient, createClinicService, createClinicUser, createNextAppointment, deleteClinicDoctor, deleteClinicHoliday, deleteClinicService, followUpAppointment, generateClinicQr, generatePatientQr, getAppointmentPayment, getClinicAppointments, getClinicAvailableSlots, getClinicDashboard, getClinicDoctors, getClinicHolidays, getClinicNotifications, getClinicPatients, getClinicProfiles, getClinicServices, getClinicUnreadNotificationCount, getClinicUsers, getClinicWeeklyAppointments, getClinicWorkingHours, getDoctorAvailability, getDoctorServices, getPatientAppointmentHistory, getUserClinics, markAllClinicNotificationsRead, markClinicNotificationRead, rescheduleAppointment, saveClinicProfile, saveClinicWhatsAppConfig, saveDoctorAvailability, searchClinicPatientsByQuery, updateAppointmentStatus, updateClinicDoctor, updateClinicProfile, updateClinicPatient, upsertClinicWorkingHours } from "../services/api";
 
 const pageMeta = {
   dashboard: ["Dashboard", "Good morning. Here's today's clinic overview."],
@@ -67,10 +67,37 @@ function addMinutesToTime(time, minutes) {
   return `${String(Math.floor(normalizedMinutes / 60)).padStart(2, "0")}:${String(normalizedMinutes % 60).padStart(2, "0")}`;
 }
 
-function Modal({ title, children, onClose, onSave, saveLabel = "Save", saveDisabled = false, saveClassName = "btn btn-primary" }) {
+const DEFAULT_CLINIC_WORKING_HOURS = [
+  { day: "MONDAY", active: true, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
+  { day: "TUESDAY", active: true, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
+  { day: "WEDNESDAY", active: true, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
+  { day: "THURSDAY", active: true, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
+  { day: "FRIDAY", active: true, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
+  { day: "SATURDAY", active: true, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
+  { day: "SUNDAY", active: false, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
+];
+
+function mapClinicWorkingHours(savedHours) {
+  const records = Array.isArray(savedHours) ? savedHours : [];
+  return DEFAULT_CLINIC_WORKING_HOURS.map((defaultHours) => {
+    const saved = records.find((item) => String(item.dayOfWeek || item.day || "").toUpperCase() === defaultHours.day);
+    if (!saved) return defaultHours;
+
+    return {
+      ...defaultHours,
+      active: saved.active ?? defaultHours.active,
+      start: normalizeTime(saved.startTime || saved.start || defaultHours.start),
+      end: normalizeTime(saved.endTime || saved.end || defaultHours.end),
+      breakStart: saved.breakStartTime == null ? "" : normalizeTime(saved.breakStartTime || saved.breakStart),
+      breakEnd: saved.breakEndTime == null ? "" : normalizeTime(saved.breakEndTime || saved.breakEnd),
+    };
+  });
+}
+
+function Modal({ title, children, onClose, onSave, saveLabel = "Save", saveDisabled = false, saveClassName = "btn btn-primary", className = "" }) {
   return (
     <div className="modal-backdrop open" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
+      <div className={`modal ${className}`}>
         <div className="modal-header">
           <h3>{title}</h3>
           <button className="close" onClick={onClose}>×</button>
@@ -83,6 +110,97 @@ function Modal({ title, children, onClose, onSave, saveLabel = "Save", saveDisab
       </div>
     </div>
   );
+}
+
+function AppointmentPaymentDialog({ appointment, token, onClose, onPaymentCollected, showToast }) {
+  const [details, setDetails] = useState(null);
+  const [amount, setAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("UPI");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPayment() {
+      try {
+        setLoading(true);
+        setError("");
+        const result = await getAppointmentPayment(appointment.id, token);
+        if (cancelled) return;
+        const totalAmount = Number(result?.totalAmount) || 0;
+        const isUnpaid = String(appointment.paymentStatus || "").toUpperCase() === "UNPAID";
+        const paymentDetails = isUnpaid && totalAmount > 0
+          ? { ...result, paidAmount: 0, remainingAmount: totalAmount, status: "UNPAID" }
+          : result;
+        setDetails(paymentDetails);
+        setAmount(String(paymentDetails?.remainingAmount ?? ""));
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Unable to load payment details.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadPayment();
+    return () => { cancelled = true; };
+  }, [appointment.id, appointment.paymentStatus, token]);
+
+  async function collectPayment() {
+    const paymentAmount = Number(amount);
+    const remainingAmount = Number(details?.remainingAmount);
+    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0 || paymentAmount > remainingAmount) {
+      setError(`Enter an amount greater than 0 and no more than ${remainingAmount}.`);
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError("");
+      const result = await collectAppointmentPayment(appointment.id, { amount: paymentAmount, paymentMethod }, token);
+      setDetails(result);
+      setAmount(String(result?.remainingAmount ?? ""));
+      onPaymentCollected?.(result);
+      showToast("Payment collected successfully");
+    } catch (err) {
+      setError(err.message || "Unable to collect payment.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <Modal
+    title="Collect Payment"
+    onClose={onClose}
+    onSave={collectPayment}
+    saveLabel={saving ? "Collecting..." : "Collect"}
+    saveDisabled={loading || saving || !details || Number(details.remainingAmount) <= 0}
+  >
+    {loading && <p className="muted">Loading payment details...</p>}
+    {details && <>
+      <div className="info-line"><span>Patient</span><strong>{appointment.patientName || "-"}</strong></div>
+      <div className="info-line"><span>Service</span><strong>{appointment.serviceName || appointment.service?.name || "-"}</strong></div>
+      <div className="info-line"><span>Total Amount</span><strong>{formatCurrency(details.totalAmount)}</strong></div>
+      <div className="info-line"><span>Paid Amount</span><strong>{formatCurrency(details.paidAmount)}</strong></div>
+      <div className="info-line"><span>Remaining</span><strong>{formatCurrency(details.remainingAmount)}</strong></div>
+      {Number(details.remainingAmount) > 0 && <div className="form-grid mt">
+        <Field label="Amount" type="number" min="0.01" max={details.remainingAmount} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} />
+        <div className="field">
+          <label>Payment Method</label>
+          <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
+            <option value="CASH">Cash</option>
+            <option value="UPI">UPI</option>
+            <option value="CARD">Card</option>
+            <option value="BANK_TRANSFER">Bank Transfer</option>
+            <option value="ONLINE">Online</option>
+            <option value="FREE">Free</option>
+          </select>
+        </div>
+      </div>}
+    </>}
+    {error && <div className="auth-error" style={{ marginTop: 12 }}>{error}</div>}
+  </Modal>;
 }
 
 export default function Dashboard({ theme, onToggleTheme }) {
@@ -153,6 +271,7 @@ export default function Dashboard({ theme, onToggleTheme }) {
   const canManageSettings = ["SUPER_ADMIN", "CLINIC_ADMIN"].includes(String(role).toUpperCase());
   const canViewClinicProfile = String(role).toUpperCase() === "SUPER_ADMIN";
   const isPlanInactive = user?.isPlanActive === false && !isSuperAdmin;
+  const canViewSubscriptions = canManageSettings || isDoctor || isPlanInactive;
   const selectedClinicName = clinics.find((clinic) => String(clinic.id) === String(selectedClinicId))?.name || "your clinic";
 
   useEffect(() => {
@@ -424,7 +543,7 @@ export default function Dashboard({ theme, onToggleTheme }) {
       <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
         <div className="brand">
           <div className="brand-logo">+</div>
-          <div className="brand-name">hola.MD</div>
+          <div className="brand-name">Hola MD</div>
         </div>
 
         <div className="clinic-switcher">
@@ -451,7 +570,7 @@ export default function Dashboard({ theme, onToggleTheme }) {
         <NavButton active={page === "reports"} onClick={() => go("reports")} icon="▥">Reports</NavButton>
         {canManageSettings && <NavButton active={page === "settings"} onClick={() => go("settings")} icon="⚙">Settings</NavButton>}
         </>}
-        {(canManageSettings || isPlanInactive) && <NavButton active={page === "subscriptions"} onClick={() => go("subscriptions")} icon="◇">Subscription</NavButton>}
+        {canViewSubscriptions && <NavButton active={page === "subscriptions"} onClick={() => go("subscriptions")} icon="◇">Subscription</NavButton>}
 
         <div className="sidebar-bottom">
           <div className="user-mini">
@@ -624,7 +743,7 @@ export default function Dashboard({ theme, onToggleTheme }) {
 
           {page === "reports" && <Reports showToast={showToast} />}
 
-          {page === "subscriptions" && (canManageSettings || isPlanInactive) && <Subscriptions clinicId={selectedClinicId} clinicName={selectedClinicName} token={token} isSuperAdmin={isSuperAdmin} showToast={showToast} />}
+          {page === "subscriptions" && canViewSubscriptions && <Subscriptions clinicId={selectedClinicId} clinicName={selectedClinicName} token={token} isSuperAdmin={isSuperAdmin} showToast={showToast} />}
 
           {page === "settings" && canManageSettings && <Settings showToast={showToast} clinicId={selectedClinicId} doctorId={userDoctorId || 1} token={token} canViewClinicProfile={canViewClinicProfile} />}
           </>}
@@ -1246,13 +1365,13 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(5);
   const [pagination, setPagination] = useState(null);
+  const [appointmentDetails, setAppointmentDetails] = useState(null);
+  const [appointmentDetailsLoading, setAppointmentDetailsLoading] = useState(false);
+  const [appointmentDetailsError, setAppointmentDetailsError] = useState("");
+  const [appointmentPaymentDetails, setAppointmentPaymentDetails] = useState(null);
+  const [appointmentPaymentLoading, setAppointmentPaymentLoading] = useState(false);
+  const [appointmentPaymentError, setAppointmentPaymentError] = useState("");
   const [paymentAppointment, setPaymentAppointment] = useState(null);
-  const [paymentDetails, setPaymentDetails] = useState(null);
-  const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("UPI");
-  const [paymentLoading, setPaymentLoading] = useState(false);
-  const [paymentSaving, setPaymentSaving] = useState(false);
-  const [paymentError, setPaymentError] = useState("");
   const isDoctor = String(userRole).toUpperCase() === "DOCTOR";
 
   useEffect(() => {
@@ -1372,39 +1491,6 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
     return () => { cancelled = true; };
   }, [clinicId, token, from, to, doctorId, serviceId, status, isDoctor, userDoctorId, page, pageSize]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadPaymentDetails() {
-      if (!paymentAppointment || !token) {
-        setPaymentDetails(null);
-        return;
-      }
-
-      try {
-        setPaymentLoading(true);
-        setPaymentError("");
-        const result = await getAppointmentPayment(paymentAppointment.id, token);
-        if (!cancelled) {
-          const totalAmount = Number(result?.totalAmount) || 0;
-          const isUnpaid = String(paymentAppointment.paymentStatus || "").toUpperCase() === "UNPAID";
-          const details = isUnpaid && totalAmount > 0
-            ? { ...result, paidAmount: 0, remainingAmount: totalAmount, status: "UNPAID" }
-            : result;
-          setPaymentDetails(details);
-          setPaymentAmount(String(details?.remainingAmount ?? ""));
-        }
-      } catch (err) {
-        if (!cancelled) setPaymentError(err.message || "Unable to load payment details.");
-      } finally {
-        if (!cancelled) setPaymentLoading(false);
-      }
-    }
-
-    loadPaymentDetails();
-    return () => { cancelled = true; };
-  }, [paymentAppointment, token]);
-
   const filteredRows = rows.filter((appointment) => {
     const query = search.trim().toLowerCase();
     const patientQuery = patientSearch.trim().toLowerCase();
@@ -1428,35 +1514,69 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
 
   function openPaymentDialog(appointment) {
     setPaymentAppointment(appointment);
-    setPaymentDetails(null);
-    setPaymentAmount("");
-    setPaymentMethod("UPI");
-    setPaymentError("");
   }
 
-  async function handleCollectPayment() {
-    const amount = Number(paymentAmount);
-    const remainingAmount = Number(paymentDetails?.remainingAmount);
-    if (!Number.isFinite(amount) || amount <= 0 || amount > remainingAmount) {
-      setPaymentError(`Enter an amount greater than 0 and no more than ${remainingAmount}.`);
-      return;
+  async function openAppointmentDetails(appointmentId) {
+    try {
+      setAppointmentDetails(null);
+      setAppointmentDetailsError("");
+      setAppointmentPaymentDetails(null);
+      setAppointmentPaymentError("");
+      setAppointmentDetailsLoading(true);
+      const result = await getClinicAppointments(clinicId, { appointmentId }, token);
+      const details = Array.isArray(result) ? result[0] : result?.items?.[0] || result;
+      if (!details) throw new Error("Appointment details were not returned.");
+      setAppointmentDetails(details);
+    } catch (err) {
+      setAppointmentDetailsError(err.message || "Unable to load appointment details.");
+    } finally {
+      setAppointmentDetailsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAppointmentPaymentDetails() {
+      if (!appointmentDetails?.id || !token) {
+        setAppointmentPaymentDetails(null);
+        return;
+      }
+
+      try {
+        setAppointmentPaymentLoading(true);
+        setAppointmentPaymentError("");
+        const result = await getAppointmentPayment(appointmentDetails.id, token);
+        if (!cancelled) setAppointmentPaymentDetails(result);
+      } catch (err) {
+        if (!cancelled) setAppointmentPaymentError(err.message || "Unable to load payment information.");
+      } finally {
+        if (!cancelled) setAppointmentPaymentLoading(false);
+      }
     }
 
-    try {
-      setPaymentSaving(true);
-      setPaymentError("");
-      const result = await collectAppointmentPayment(paymentAppointment.id, { amount, paymentMethod }, token);
-      setPaymentDetails(result);
-      setPaymentAmount(String(result?.remainingAmount ?? ""));
+    loadAppointmentPaymentDetails();
+    return () => { cancelled = true; };
+  }, [appointmentDetails?.id, token]);
+
+  function closeAppointmentDetails() {
+    setAppointmentDetails(null);
+    setAppointmentDetailsError("");
+    setAppointmentPaymentDetails(null);
+    setAppointmentPaymentError("");
+  }
+
+  function scheduleAppointmentFollowUp() {
+    if (!appointmentDetails) return;
+    const appointment = appointmentDetails;
+    closeAppointmentDetails();
+    handleCreateNextAppointment(appointment);
+  }
+
+  function handlePaymentCollected(result) {
       setRows((items) => items.map((item) => String(item.id) === String(paymentAppointment.id)
         ? { ...item, paymentStatus: result?.status || item.paymentStatus }
         : item));
-      showToast("Payment collected successfully");
-    } catch (err) {
-      setPaymentError(err.message || "Unable to collect payment.");
-    } finally {
-      setPaymentSaving(false);
-    }
   }
 
   async function handleStatusUpdate(appointmentId, nextStatus) {
@@ -1656,9 +1776,10 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
           </td>
           <td>{appointment.suggestedFollowUpDate || "-"}</td>
           <td><div className="row-actions">
+            <button className="btn btn-light icon-btn" title="View appointment details" aria-label="View appointment details" onClick={() => openAppointmentDetails(appointment.id)}>◉</button>
             {action && <button className="btn btn-light icon-btn" title={isUpdating ? "Updating..." : action.label} disabled={isUpdating} onClick={() => handleStatusUpdate(appointment.id, action.nextStatus)} aria-label={isUpdating ? "Updating..." : action.label}>{isUpdating ? "…" : action.label === "Mark Completed" ? "✓" : "→"}</button>}
             {canCreateNextAppointment(appointment) && <button className="btn btn-light icon-btn" title={isCreatingNext ? "Creating..." : "Next Visit"} disabled={isCreatingNext} onClick={() => handleCreateNextAppointment(appointment)} aria-label={isCreatingNext ? "Creating..." : "Next Visit"}>{isCreatingNext ? "…" : "+"}</button>}
-            <button className="btn btn-light icon-btn" title={isRescheduling ? "Rescheduling..." : "Reschedule"} disabled={isRescheduling} onClick={() => handleRescheduleAppointment(appointment)} aria-label={isRescheduling ? "Rescheduling..." : "Reschedule"}>{isRescheduling ? "…" : "↺"}</button>
+            {appointmentStatus !== "COMPLETED" && <button className="btn btn-light icon-btn" title={isRescheduling ? "Rescheduling..." : "Reschedule"} disabled={isRescheduling} onClick={() => handleRescheduleAppointment(appointment)} aria-label={isRescheduling ? "Rescheduling..." : "Reschedule"}>{isRescheduling ? "…" : "↺"}</button>}
             {canCancelAppointment(appointment) && <button className="btn btn-danger icon-btn" title={isCancelling ? "Cancelling..." : "Cancel"} disabled={isCancelling} onClick={() => handleCancelAppointment(appointment.id)} aria-label={isCancelling ? "Cancelling..." : "Cancel"}>{isCancelling ? "…" : "✕"}</button>}
           </div></td>
         </tr>;
@@ -1673,6 +1794,92 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
       </div>
     </div>}
   </div></section>
+  {(appointmentDetails || appointmentDetailsLoading || appointmentDetailsError) && <Modal
+    title="Appointment Overview"
+    className="appointment-overview-modal"
+    onClose={closeAppointmentDetails}
+    onSave={closeAppointmentDetails}
+    saveLabel="Close"
+    saveDisabled={appointmentDetailsLoading}
+  >
+    {appointmentDetailsLoading && <p className="muted">Loading appointment details...</p>}
+    {appointmentDetailsError && <div className="auth-error">{appointmentDetailsError}</div>}
+    {appointmentDetails && <>
+      {(() => {
+        const status = String(appointmentDetails.status || "").toUpperCase();
+        const statusClass = status === "IN_CONSULTATION" ? "in_progress" : status.toLowerCase();
+        const patientName = appointmentDetails.patientName || appointmentDetails.patient?.name || "Unknown patient";
+        const patientPhone = appointmentDetails.phoneNo || appointmentDetails.patientPhone || appointmentDetails.patient?.phoneNo || "-";
+        const appointmentDate = appointmentDetails.appointmentDate || appointmentDetails.date;
+        const startTime = appointmentDetails.startTime || appointmentDetails.time;
+        const paymentStatus = appointmentPaymentDetails?.status || appointmentDetails.paymentStatus || "-";
+        const paidAt = appointmentPaymentDetails?.paidAt || appointmentDetails.paidAt;
+        const amount = appointmentPaymentDetails?.totalAmount ?? appointmentDetails.totalAmount ?? appointmentDetails.amount;
+        const paymentMethod = appointmentPaymentDetails?.paymentMethod || appointmentDetails.paymentMethod;
+        const statusOrder = ["CONFIRMED", "CHECKED_IN", "WAITING", "IN_CONSULTATION", "COMPLETED"];
+        const currentStatusIndex = statusOrder.indexOf(status);
+        const timelineSteps = [
+          { label: "Booked", time: appointmentDetails.createdAt || appointmentDetails.bookedAt, done: true },
+          { label: "Confirmed", time: appointmentDetails.confirmedAt, done: currentStatusIndex >= 0 },
+          { label: "Checked In", time: appointmentDetails.checkedInAt, done: currentStatusIndex >= 1 },
+          { label: "Waiting", time: appointmentDetails.waitingAt, done: currentStatusIndex >= 2 },
+          { label: "In Consultation", time: appointmentDetails.consultationStartedAt || appointmentDetails.inConsultationAt, done: currentStatusIndex >= 3 },
+          { label: "Completed", time: appointmentDetails.completedAt, done: currentStatusIndex >= 4 },
+        ];
+        const formatDateTime = (value) => {
+          if (!value) return "";
+          const date = new Date(value);
+          return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+        };
+        const formatAppointmentDate = (date, time) => {
+          if (!date) return "-";
+          const parsed = new Date(`${String(date).slice(0, 10)}T00:00:00`);
+          const dateLabel = Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+          return `${dateLabel}${time ? ` · ${formatTime(time)}` : ""}`;
+        };
+        const canScheduleFollowUp = canCreateNextAppointment(appointmentDetails);
+
+        return <div className="appointment-overview">
+          <div className="appointment-overview-summary">
+            <span className={`status ${statusClass}`}>{appointmentDetails.status || "-"}</span>
+            <div><small>Appointment ID</small><strong>#{appointmentDetails.id ?? appointmentDetails.appointmentId ?? "-"}</strong></div>
+            <div className="appointment-overview-date"><span aria-hidden="true">▦</span><div><small>Date &amp; Time</small><strong>{formatAppointmentDate(appointmentDate, startTime)}</strong></div></div>
+          </div>
+
+          <div className="appointment-overview-grid">
+            <section className="appointment-overview-section">
+              <h4><span aria-hidden="true">♙</span>Patient Information</h4>
+              <div className="appointment-patient-overview"><div className="appointment-overview-avatar">{initials({ firstName: patientName })}</div><div><strong>{patientName}</strong><span>{patientPhone}</span></div></div>
+            </section>
+            <section className="appointment-overview-section">
+              <h4><span aria-hidden="true">✚</span>Consultation Details</h4>
+              <div className="appointment-overview-detail"><span>Doctor</span><strong>{appointmentDetails.doctorName || appointmentDetails.doctor?.name || "-"}</strong></div>
+              <div className="appointment-overview-detail"><span>Service</span><strong>{appointmentDetails.serviceName || appointmentDetails.service?.name || "-"}</strong></div>
+              <div className="appointment-overview-detail"><span>Source</span><strong>{appointmentDetails.source || appointmentDetails.bookingSource || "-"}</strong></div>
+            </section>
+            <section className="appointment-overview-section">
+              <div className="appointment-overview-section-heading"><h4><span aria-hidden="true">▤</span>Payment Information</h4><span className={`status ${String(paymentStatus).toLowerCase()}`}>{paymentStatus}</span></div>
+              {appointmentPaymentLoading && <p className="muted">Loading payment...</p>}
+              {appointmentPaymentError && <p className="muted">{appointmentPaymentError}</p>}
+              <div className="appointment-overview-detail"><span>Amount</span><strong>{amount == null ? "-" : formatCurrency(amount)}</strong></div>
+              <div className="appointment-overview-detail"><span>Payment Method</span><strong>{paymentMethod || "-"}</strong></div>
+              <div className="appointment-overview-detail"><span>Payment Status</span><strong>{paidAt ? `Paid on ${formatDateTime(paidAt)}` : paymentStatus}</strong></div>
+            </section>
+            <section className="appointment-overview-section">
+              <h4><span aria-hidden="true">▦</span>Follow-up</h4>
+              <div className="appointment-overview-detail"><span>Suggested Follow-up</span><strong>{appointmentDetails.suggestedFollowUpDate || "-"}</strong></div>
+              {canScheduleFollowUp && <button className="btn btn-outline appointment-follow-up-button" onClick={scheduleAppointmentFollowUp}>＋ Schedule follow-up</button>}
+            </section>
+          </div>
+
+          <section className="appointment-overview-section appointment-timeline">
+            <h4><span aria-hidden="true">◷</span>Appointment Timeline</h4>
+            <div className="appointment-timeline-steps">{timelineSteps.map((step) => <div className={`appointment-timeline-step ${step.done ? "done" : ""}`} key={step.label}><span className="appointment-timeline-marker">{step.done ? "✓" : ""}</span><strong>{step.label}</strong><small>{formatDateTime(step.time) || ""}</small></div>)}</div>
+          </section>
+        </div>;
+      })()}
+    </>}
+  </Modal>}
   {cancelConfirmationId && <Modal
     title="Cancel Appointment"
     onClose={() => { setCancelConfirmationId(null); setCancelError(""); }}
@@ -1710,37 +1917,13 @@ function Appointments({ clinicId, token, userRole, userDoctorId, search, openMod
     </div>
     {scheduleError && <div className="auth-error" style={{ marginTop: 12 }}>{scheduleError}</div>}
   </Modal>}
-  {paymentAppointment && <Modal
-    title="Collect Payment"
-    onClose={() => { setPaymentAppointment(null); setPaymentDetails(null); setPaymentError(""); }}
-    onSave={handleCollectPayment}
-    saveLabel={paymentSaving ? "Collecting..." : "Collect"}
-    saveDisabled={paymentLoading || paymentSaving || !paymentDetails || Number(paymentDetails.remainingAmount) <= 0}
-  >
-    {paymentLoading && <p className="muted">Loading payment details...</p>}
-    {paymentDetails && <>
-      <div className="info-line"><span>Patient</span><strong>{paymentAppointment.patientName || "-"}</strong></div>
-      <div className="info-line"><span>Service</span><strong>{paymentAppointment.serviceName || paymentAppointment.service?.name || "-"}</strong></div>
-      <div className="info-line"><span>Total Amount</span><strong>{formatCurrency(paymentDetails.totalAmount)}</strong></div>
-      <div className="info-line"><span>Paid Amount</span><strong>{formatCurrency(paymentDetails.paidAmount)}</strong></div>
-      <div className="info-line"><span>Remaining</span><strong>{formatCurrency(paymentDetails.remainingAmount)}</strong></div>
-      {Number(paymentDetails.remainingAmount) > 0 && <div className="form-grid mt">
-        <Field label="Amount" type="number" min="0.01" max={paymentDetails.remainingAmount} step="0.01" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
-        <div className="field">
-          <label>Payment Method</label>
-          <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
-            <option value="CASH">Cash</option>
-            <option value="UPI">UPI</option>
-            <option value="CARD">Card</option>
-            <option value="BANK_TRANSFER">Bank Transfer</option>
-            <option value="ONLINE">Online</option>
-            <option value="FREE">Online</option>
-          </select>
-        </div>
-      </div>}
-    </>}
-    {paymentError && <div className="auth-error" style={{ marginTop: 12 }}>{paymentError}</div>}
-  </Modal>}
+  {paymentAppointment && <AppointmentPaymentDialog
+    appointment={paymentAppointment}
+    token={token}
+    onClose={() => setPaymentAppointment(null)}
+    onPaymentCollected={handlePaymentCollected}
+    showToast={showToast}
+  />}
   </>;
 }
 
@@ -1924,6 +2107,7 @@ function AppointmentQueue({ clinicId, token, userRole, userDoctorId, search, sho
   const [updatingAppointmentId, setUpdatingAppointmentId] = useState(null);
   const [draggedWaitingAppointmentId, setDraggedWaitingAppointmentId] = useState(null);
   const [followUpSchedule, setFollowUpSchedule] = useState(null);
+  const [paymentAppointment, setPaymentAppointment] = useState(null);
   const [followUpSlots, setFollowUpSlots] = useState([]);
   const [followUpSlotsLoading, setFollowUpSlotsLoading] = useState(false);
   const [followUpScheduleError, setFollowUpScheduleError] = useState("");
@@ -2055,6 +2239,12 @@ function AppointmentQueue({ clinicId, token, userRole, userDoctorId, search, sho
     }
   }
 
+  function handleQueuePaymentCollected(result) {
+    setInProgressAppointments((items) => items.map((appointment) => String(appointment.id) === String(paymentAppointment.id)
+      ? { ...appointment, paymentStatus: result?.status || appointment.paymentStatus }
+      : appointment));
+  }
+
   async function changeStatus(appointmentId, nextStatus) {
     try {
       setUpdatingAppointmentId(appointmentId);
@@ -2080,7 +2270,7 @@ function AppointmentQueue({ clinicId, token, userRole, userDoctorId, search, sho
     {error && <div className="auth-error">{error}</div>}
     {loading && <div className="card queue-empty"><span className="queue-pulse" /><p>Loading the queue...</p></div>}
     {!loading && !error && totalInQueue === 0 && <div className="card queue-empty"><div className="queue-empty-icon">✓</div><h3>Queue is clear</h3><p>No consultation or waiting patients need attention right now.</p></div>}
-    {!loading && !error && totalInQueue > 0 && <div className="queue-columns"><QueueLane title="Start Consultation" subtitle="Consultation in progress" appointments={visibleInProgressAppointments} actionLabel="Follow Up" nextStatus="FOLLOW_UP" updatingAppointmentId={updatingAppointmentId} onStatusChange={handleFollowUp} /><QueueLane title="Waiting" subtitle="Ready for the doctor" appointments={visibleWaitingAppointments} actionLabel="Start Consultation" nextStatus="IN_CONSULTATION" updatingAppointmentId={updatingAppointmentId} onStatusChange={changeStatus} isReorderable onReorder={reorderWaitingAppointments} draggedAppointmentId={draggedWaitingAppointmentId} setDraggedAppointmentId={setDraggedWaitingAppointmentId} /></div>}
+    {!loading && !error && totalInQueue > 0 && <div className="queue-columns"><QueueLane title="Start Consultation" subtitle="Consultation in progress" appointments={visibleInProgressAppointments} actionLabel="Follow Up" nextStatus="FOLLOW_UP" updatingAppointmentId={updatingAppointmentId} onStatusChange={handleFollowUp} onCollectPayment={(appointment) => setPaymentAppointment(appointment)} /><QueueLane title="Waiting" subtitle="Ready for the doctor" appointments={visibleWaitingAppointments} actionLabel="Start Consultation" nextStatus="IN_CONSULTATION" updatingAppointmentId={updatingAppointmentId} onStatusChange={changeStatus} isReorderable onReorder={reorderWaitingAppointments} draggedAppointmentId={draggedWaitingAppointmentId} setDraggedAppointmentId={setDraggedWaitingAppointmentId} /></div>}
   </section>
   {followUpSchedule && <Modal
     title="Schedule Follow-up"
@@ -2104,10 +2294,17 @@ function AppointmentQueue({ clinicId, token, userRole, userDoctorId, search, sho
     </div>
     {followUpScheduleError && <div className="auth-error" style={{ marginTop: 12 }}>{followUpScheduleError}</div>}
   </Modal>}
+  {paymentAppointment && <AppointmentPaymentDialog
+    appointment={paymentAppointment}
+    token={token}
+    onClose={() => setPaymentAppointment(null)}
+    onPaymentCollected={handleQueuePaymentCollected}
+    showToast={showToast}
+  />}
   </>;
 }
 
-function QueueLane({ title, subtitle, appointments, actionLabel, nextStatus, updatingAppointmentId, onStatusChange, isReorderable = false, onReorder, draggedAppointmentId, setDraggedAppointmentId }) {
+function QueueLane({ title, subtitle, appointments, actionLabel, nextStatus, updatingAppointmentId, onStatusChange, onCollectPayment, isReorderable = false, onReorder, draggedAppointmentId, setDraggedAppointmentId }) {
   return <div className="queue-lane"><div className="queue-lane-header"><div><h3>{title}</h3><p>{subtitle}</p></div><span>{appointments.length}</span></div>{appointments.length === 0 ? <div className="lane-empty">No patients</div> : <div className="queue-list">{appointments.map((appointment, index) => <div className={`queue-item ${draggedAppointmentId === appointment.id ? "dragging" : ""}`} key={appointment.id} draggable={isReorderable} onDragStart={(event) => {
       if (!isReorderable) return;
       event.dataTransfer.effectAllowed = "move";
@@ -2129,7 +2326,10 @@ function QueueLane({ title, subtitle, appointments, actionLabel, nextStatus, upd
     <div className="queue-patient"><div className="queue-avatar">{initials({ firstName: appointment.patientName })}</div><div><h3>{appointment.patientName || "Unknown patient"}</h3><p>{appointment.serviceName || appointment.service?.name || "Consultation"}</p></div></div>
     <div className="queue-detail"><span>Doctor</span><strong>{appointment.doctorName || appointment.doctor?.name || "-"}</strong></div>
     <div className="queue-detail"><span>Time</span><strong>{formatTime(appointment.startTime || appointment.time)}</strong></div>
-    <button className="btn btn-primary queue-action" disabled={updatingAppointmentId === appointment.id} onClick={() => onStatusChange(appointment.id, nextStatus)}>{updatingAppointmentId === appointment.id ? "Updating..." : actionLabel}</button>
+    <div className="queue-item-actions">
+      <button className="btn btn-primary queue-action" disabled={updatingAppointmentId === appointment.id} onClick={() => onStatusChange(appointment.id, nextStatus)}>{updatingAppointmentId === appointment.id ? "Updating..." : actionLabel}</button>
+      {onCollectPayment && ["UNPAID", "PARTIAL"].includes(String(appointment.paymentStatus || "UNPAID").toUpperCase()) && <button className="btn btn-light queue-action" onClick={() => onCollectPayment(appointment)}>Collect Payment</button>}
+    </div>
   </div>)}</div>}</div>;
 }
 
@@ -2436,6 +2636,7 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
   const [holidaySaving, setHolidaySaving] = useState(false);
   const [holidayList, setHolidayList] = useState([]);
   const [holidayListLoading, setHolidayListLoading] = useState(true);
+  const [deletingHolidayId, setDeletingHolidayId] = useState(null);
   const defaultDoctorAvailability = [
     { day: "MONDAY", active: true, start: "09:00", end: "15:00", breakStart: "13:00", breakEnd: "14:00" },
     { day: "TUESDAY", active: true, start: "13:00", end: "19:00", breakStart: "", breakEnd: "" },
@@ -2450,15 +2651,33 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
   const [availableDoctors, setAvailableDoctors] = useState([]);
   const [selectedDoctorId, setSelectedDoctorId] = useState(String(doctorId || ""));
   const [activeTab, setActiveTab] = useState("profile");
-  const [workingHours, setWorkingHours] = useState([
-    { day: "MONDAY", active: true, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
-    { day: "TUESDAY", active: true, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
-    { day: "WEDNESDAY", active: true, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
-    { day: "THURSDAY", active: true, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
-    { day: "FRIDAY", active: true, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
-    { day: "SATURDAY", active: true, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
-    { day: "SUNDAY", active: false, start: "09:00", end: "19:00", breakStart: "13:00", breakEnd: "14:00" },
-  ]);
+  const [workingHours, setWorkingHours] = useState(DEFAULT_CLINIC_WORKING_HOURS);
+  const [workingHoursLoading, setWorkingHoursLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWorkingHours() {
+      if (!token || !clinicId) {
+        setWorkingHours(DEFAULT_CLINIC_WORKING_HOURS);
+        setWorkingHoursLoading(false);
+        return;
+      }
+
+      try {
+        setWorkingHoursLoading(true);
+        const result = await getClinicWorkingHours(clinicId, token);
+        if (!cancelled) setWorkingHours(mapClinicWorkingHours(result));
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Unable to load clinic working hours.");
+      } finally {
+        if (!cancelled) setWorkingHoursLoading(false);
+      }
+    }
+
+    loadWorkingHours();
+    return () => { cancelled = true; };
+  }, [clinicId, token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2803,6 +3022,28 @@ function Settings({ showToast, clinicId, token, canViewClinicProfile, doctorId }
     }
   }
 
+  async function handleHolidayDelete(holiday) {
+    if (!token || !clinicId || !holiday?.id) {
+      setError("Unable to delete this clinic holiday.");
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete the holiday "${holiday.name}"?`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingHolidayId(holiday.id);
+      setError("");
+      await deleteClinicHoliday(clinicId, holiday.id, token);
+      setHolidayList((items) => items.filter((item) => String(item.id) !== String(holiday.id)));
+      showToast("Clinic holiday deleted successfully");
+    } catch (err) {
+      setError(err.message || "Unable to delete clinic holiday.");
+    } finally {
+      setDeletingHolidayId(null);
+    }
+  }
+
   async function handleDoctorAvailabilitySave() {
     if (!token) {
       setError("A clinic-admin login token is required.");
@@ -3074,6 +3315,7 @@ const handleWhatsAppSignupResponse = async (response) => {
             return <div className="holiday-settings-row" key={holiday.id || `${holidayDate}-${holiday.name}`}>
               <div className="holiday-settings-date">{parsedDate ? parsedDate.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : holidayDate || "-"}</div>
               <div className="holiday-settings-name">{holiday.name}</div>
+              <button className="btn btn-danger icon-btn" title="Delete holiday" aria-label={`Delete holiday ${holiday.name}`} disabled={deletingHolidayId === holiday.id} onClick={() => handleHolidayDelete(holiday)}>{deletingHolidayId === holiday.id ? "…" : "✕"}</button>
             </div>;
           })}</div>}
         </div>
@@ -3102,6 +3344,7 @@ const handleWhatsAppSignupResponse = async (response) => {
       {activeTab === "hours" && <div className="working-hours mt">
         <h3>Working Hours</h3>
         <p className="muted">Set the clinic schedule and daily break times.</p>
+        {workingHoursLoading && <p className="muted">Loading saved working hours...</p>}
         <div className="working-hours-list">
           {workingHours.map((hours, index) => <div className={`working-hour-row ${hours.active ? "" : "disabled"}`} key={hours.day}>
             <label className="day-toggle"><input type="checkbox" checked={hours.active} onChange={(e) => setWorkingHours((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, active: e.target.checked } : item))} /><strong>{hours.day}</strong></label>
@@ -3139,7 +3382,7 @@ const handleWhatsAppSignupResponse = async (response) => {
           } finally {
             setWorkingHoursSaving(false);
           }
-        }} disabled={workingHoursSaving}>{workingHoursSaving ? "Saving..." : "Save Working Hours"}</button>
+        }} disabled={workingHoursSaving || workingHoursLoading}>{workingHoursSaving ? "Saving..." : "Save Working Hours"}</button>
         </div>}
       {activeTab === "whatsapp" && <div className="mt">
         {canViewClinicProfile && <>
