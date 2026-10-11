@@ -20,6 +20,7 @@ const pageMeta = {
   reports: ["Reports", "Clinic performance and appointment analytics."],
   subscriptions: ["Subscription", "Manage plans, payments, and clinic limits."],
   settings: ["Settings", "Configure your clinic."],
+  accountSecurity: ["Account Security", "Protect your account with an authenticator app."],
 };
 
 const appointments = [
@@ -583,6 +584,7 @@ export default function Dashboard({ theme, onToggleTheme }) {
         {canManageSettings && <NavButton active={page === "settings"} onClick={() => go("settings")} icon="⚙">Settings</NavButton>}
         </>}
         {canViewSubscriptions && <NavButton active={page === "subscriptions"} onClick={() => go("subscriptions")} icon="◇">Subscription</NavButton>}
+        <NavButton active={page === "accountSecurity"} onClick={() => go("accountSecurity")} icon="▣">Account Security</NavButton>
 
         <div className="sidebar-bottom">
           <div className="user-mini">
@@ -783,6 +785,7 @@ export default function Dashboard({ theme, onToggleTheme }) {
 
           {page === "settings" && canManageSettings && <Settings showToast={showToast} clinicId={selectedClinicId} clinicName={selectedClinicName} token={token} canViewClinicProfile={canViewClinicProfile} />}
           </>}
+          {page === "accountSecurity" && <AccountSecurity showToast={showToast} />}
         </div>
       </main>
 
@@ -3722,6 +3725,155 @@ function Staff({ openModal, clinicId, token, refreshKey }) {
       </tbody></table></div>}
     </div>
   </div></section>;
+}
+
+function AccountSecurity({ showToast }) {
+  const { setupAuthenticator, enableAuthenticator, disableAuthenticator } = useAuth();
+  const [setup, setSetup] = useState(null);
+  const [qrCodeImage, setQrCodeImage] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [disablePassword, setDisablePassword] = useState("");
+  const [disableCode, setDisableCode] = useState("");
+  const [loadingSetup, setLoadingSetup] = useState(false);
+  const [loadingEnable, setLoadingEnable] = useState(false);
+  const [loadingDisable, setLoadingDisable] = useState(false);
+  const [showDisableForm, setShowDisableForm] = useState(false);
+  const [error, setError] = useState("");
+  const [enabled, setEnabled] = useState(false);
+
+  async function handleSetup() {
+    setError("");
+    setSetup(null);
+    setQrCodeImage("");
+    try {
+      setLoadingSetup(true);
+      const result = await setupAuthenticator();
+      const data = result?.data || result;
+      if (!data?.otpauthUri || !data?.secret) {
+        throw new Error("Authenticator setup response did not include the secret and otpauth URI.");
+      }
+      const { default: QRCode } = await import("qrcode");
+      const image = await QRCode.toDataURL(data.otpauthUri, { width: 240, margin: 2 });
+      setSetup({ secret: data.secret, otpauthUri: data.otpauthUri });
+      setQrCodeImage(image);
+      setEnabled(false);
+    } catch (err) {
+      setError(err.message || "Unable to start authenticator setup.");
+    } finally {
+      setLoadingSetup(false);
+    }
+  }
+
+  async function handleEnable(event) {
+    event.preventDefault();
+    setError("");
+    const code = verificationCode.trim();
+    if (!/^\d{6}$/.test(code)) {
+      setError("Enter the 6-digit code from your authenticator app.");
+      return;
+    }
+
+    try {
+      setLoadingEnable(true);
+      await enableAuthenticator(code);
+      setEnabled(true);
+      setVerificationCode("");
+      showToast("Authenticator enabled for your account.");
+    } catch (err) {
+      setError(err.message || "Unable to enable the authenticator.");
+    } finally {
+      setLoadingEnable(false);
+    }
+  }
+
+  async function handleDisable(event) {
+    event.preventDefault();
+    setError("");
+    const code = disableCode.trim();
+    if (!disablePassword) {
+      setError("Enter your current password to disable the authenticator.");
+      return;
+    }
+    if (!/^\d{6}$/.test(code)) {
+      setError("Enter the 6-digit code from your authenticator app.");
+      return;
+    }
+
+    try {
+      setLoadingDisable(true);
+      await disableAuthenticator(disablePassword, code);
+      setEnabled(false);
+      setSetup(null);
+      setQrCodeImage("");
+      setDisablePassword("");
+      setDisableCode("");
+      setShowDisableForm(false);
+      showToast("Authenticator disabled for your account.");
+    } catch (err) {
+      setError(err.message || "Unable to disable the authenticator.");
+    } finally {
+      setLoadingDisable(false);
+    }
+  }
+
+  return <section className="page active">
+    <div className="card">
+      <div className="card-header"><div><h3>Authenticator app</h3><p>Use a time-based one-time password (TOTP) app to add a second sign-in step.</p></div></div>
+      <div className="card-body">
+        {error && <div className="auth-error">{error}</div>}
+        {enabled && <div className="auth-success">Authenticator is enabled. You will be asked for a code at your next sign-in.</div>}
+        {!setup && !enabled && <div>
+          <p className="muted">Set up an authenticator app such as Google Authenticator, Microsoft Authenticator, or 1Password.</p>
+          <button className="btn btn-primary" type="button" onClick={handleSetup} disabled={loadingSetup}>{loadingSetup ? "Preparing setup..." : "Set up authenticator"}</button>
+        </div>}
+        {setup && <div className="grid-2 mt" style={{ alignItems: "start" }}>
+          <div>
+            <h4>1. Scan this QR code</h4>
+            <img src={qrCodeImage} alt="Authenticator setup QR code" width="240" height="240" style={{ display: "block", maxWidth: "100%", height: "auto", border: "1px solid var(--border)", borderRadius: 10, padding: 8, background: "#fff" }} />
+            <p className="muted">If you cannot scan the QR, enter this setup key manually:</p>
+            <code style={{ overflowWrap: "anywhere", userSelect: "all" }}>{setup.secret}</code>
+          </div>
+          <form onSubmit={handleEnable} className="auth-form">
+            <h4>2. Verify and enable</h4>
+            <p className="muted">Enter the current 6-digit code shown by your authenticator app.</p>
+            <div className="field">
+              <label htmlFor="setup-authenticator-code">Authenticator code</label>
+              <input
+                id="setup-authenticator-code"
+                value={verificationCode}
+                onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="000000"
+                pattern="[0-9]{6}"
+              />
+            </div>
+            <button className="btn btn-primary" type="submit" disabled={loadingEnable}>{loadingEnable ? "Enabling..." : "Enable authenticator"}</button>
+            <button className="btn btn-outline" type="button" onClick={handleSetup} disabled={loadingSetup || loadingEnable}>{loadingSetup ? "Refreshing..." : "Generate a new setup key"}</button>
+          </form>
+        </div>}
+        <div className="mt">
+          {!showDisableForm && <button className="btn btn-outline" type="button" onClick={() => { setShowDisableForm(true); setError(""); }}>Disable authenticator</button>}
+          {showDisableForm && <form onSubmit={handleDisable} className="auth-form" style={{ maxWidth: 440 }}>
+            <h4>Disable authenticator</h4>
+            <p className="muted">Confirm your current password and enter a current code from your authenticator app.</p>
+            <div className="field">
+              <label htmlFor="disable-authenticator-password">Current password</label>
+              <input id="disable-authenticator-password" type="password" value={disablePassword} onChange={(event) => setDisablePassword(event.target.value)} autoComplete="current-password" />
+            </div>
+            <div className="field">
+              <label htmlFor="disable-authenticator-code">Authenticator code</label>
+              <input id="disable-authenticator-code" value={disableCode} onChange={(event) => setDisableCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" placeholder="000000" pattern="[0-9]{6}" />
+            </div>
+            <div className="quick-actions">
+              <button className="btn btn-danger" type="submit" disabled={loadingDisable}>{loadingDisable ? "Disabling..." : "Confirm disable"}</button>
+              <button className="btn btn-outline" type="button" onClick={() => { setShowDisableForm(false); setDisablePassword(""); setDisableCode(""); setError(""); }} disabled={loadingDisable}>Keep enabled</button>
+            </div>
+          </form>}
+        </div>
+      </div>
+    </div>
+  </section>;
 }
 
 function Reports({ showToast }) {

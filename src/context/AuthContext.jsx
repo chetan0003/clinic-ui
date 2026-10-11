@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { getUserClinics, login as loginApi } from "../services/api";
+import { disableAuthenticator as disableAuthenticatorApi, enableAuthenticator as enableAuthenticatorApi, getUserClinics, login as loginApi, setupAuthenticator as setupAuthenticatorApi, verifyAuthenticatorLogin } from "../services/api";
 
 const AuthContext = createContext(null);
 
@@ -10,22 +10,28 @@ function extractToken(data) {
     data.accessToken ||
     data.jwt ||
     data.access_token ||
+    data?.login?.token ||
+    data?.login?.accessToken ||
     data?.data?.token ||
     data?.data?.accessToken ||
+    data?.data?.login?.token ||
     null
   );
 }
 
 function extractUser(data, username) {
+  const loginData = data?.login || data?.data?.login || data;
+  const responseUser = data?.user || data?.data?.user;
   return (
-    data?.user ||
-    data?.data?.user ||
+    responseUser ||
     {
-      username: data?.username || username,
-      firstName: data?.firstName,
-      lastName: data?.lastName,
-      role: data?.role || data?.roles?.[0],
-      clinicId: data?.clinicId,
+      username: loginData?.username || username,
+      firstName: loginData?.firstName,
+      lastName: loginData?.lastName,
+      role: loginData?.role || loginData?.roles?.[0],
+      roles: loginData?.roles,
+      userId: loginData?.userId,
+      clinicId: loginData?.clinicId,
     }
   );
 }
@@ -41,6 +47,7 @@ export function AuthProvider({ children }) {
   });
   const [profileLoading, setProfileLoading] = useState(() => Boolean(localStorage.getItem("clinicflow_token")));
   const [profileError, setProfileError] = useState("");
+  const [pendingAuthChallenge, setPendingAuthChallenge] = useState(null);
 
   const refreshUser = useCallback(async () => {
     if (!token || !user?.username) {
@@ -93,6 +100,15 @@ export function AuthProvider({ children }) {
 
   async function login(username, password) {
     const data = await loginApi(username, password);
+    const responseData = data?.data || data;
+    if (responseData?.totpRequired) {
+      if (!responseData.challengeToken) {
+        throw new Error("Authenticator verification is required, but the login response did not include a challenge token.");
+      }
+      setPendingAuthChallenge({ challengeToken: responseData.challengeToken, username });
+      return { totpRequired: true };
+    }
+
     const newToken = extractToken(data);
 
     if (!newToken) {
@@ -104,12 +120,53 @@ export function AuthProvider({ children }) {
     const newUser = extractUser(data, username);
     setProfileLoading(true);
     setProfileError("");
+    setPendingAuthChallenge(null);
     localStorage.setItem("clinicflow_token", newToken);
     localStorage.setItem("clinicflow_user", JSON.stringify(newUser));
     setToken(newToken);
     setUser(newUser);
 
     return data;
+  }
+
+  async function completeAuthenticatorLogin(code) {
+    if (!pendingAuthChallenge?.challengeToken) {
+      throw new Error("Your authenticator login session has expired. Sign in again.");
+    }
+    const data = await verifyAuthenticatorLogin(pendingAuthChallenge.challengeToken, code);
+    const newToken = extractToken(data);
+    if (!newToken) {
+      throw new Error("Authenticator verification succeeded but no access token was returned.");
+    }
+
+    const newUser = extractUser(data, pendingAuthChallenge.username);
+    setProfileLoading(true);
+    setProfileError("");
+    setPendingAuthChallenge(null);
+    localStorage.setItem("clinicflow_token", newToken);
+    localStorage.setItem("clinicflow_user", JSON.stringify(newUser));
+    setToken(newToken);
+    setUser(newUser);
+    return data;
+  }
+
+  function cancelAuthenticatorLogin() {
+    setPendingAuthChallenge(null);
+  }
+
+  async function setupAuthenticator() {
+    if (!token) throw new Error("Sign in again before setting up an authenticator.");
+    return setupAuthenticatorApi(token);
+  }
+
+  async function enableAuthenticator(code) {
+    if (!token) throw new Error("Sign in again before enabling an authenticator.");
+    return enableAuthenticatorApi(code, token);
+  }
+
+  async function disableAuthenticator(password, code) {
+    if (!token) throw new Error("Sign in again before disabling the authenticator.");
+    return disableAuthenticatorApi(password, code, token);
   }
 
   function logout() {
@@ -119,6 +176,7 @@ export function AuthProvider({ children }) {
     setUser(null);
     setProfileLoading(false);
     setProfileError("");
+    setPendingAuthChallenge(null);
   }
 
   const value = useMemo(
@@ -128,11 +186,17 @@ export function AuthProvider({ children }) {
       isAuthenticated: Boolean(token),
       profileLoading,
       profileError,
+      pendingAuthChallenge,
       refreshUser,
       login,
+      completeAuthenticatorLogin,
+      cancelAuthenticatorLogin,
+      setupAuthenticator,
+      enableAuthenticator,
+      disableAuthenticator,
       logout,
     }),
-    [token, user, profileLoading, profileError, refreshUser]
+    [token, user, profileLoading, profileError, pendingAuthChallenge, refreshUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
